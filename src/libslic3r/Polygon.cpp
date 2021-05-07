@@ -172,21 +172,24 @@ void Polygon::triangulate_convex(Polygons* polygons) const
 // source: https://en.wikipedia.org/wiki/Centroid
 Point Polygon::centroid() const
 {
+    assert(points.size() >= 3);
     double sum_x     = 0.;
     double sum_y     = 0.;
-    double half_area = 0.;
+    double twice_area = 0.;
     auto   add       = [&](const Point &p1, const Point &p2) {
         Vec2d  p1d  = p1.cast<double>();
         double area = p1d.x() * p2.y() - p1d.y() * p2.x();
         sum_x += (p1d.x() + p2.x()) * area;
         sum_y += (p1d.y() + p2.y()) * area;
-        half_area += area;
+        twice_area += area;
     };
     for (size_t i = 1; i < points.size(); i++) {
         add(points[i - 1], points[i]);
     }
     add(points.back(), points.front());
-    double area6 = half_area * 3;
+
+    // area multiplied by 6
+    double area6 = twice_area * 3;
     return Point(static_cast<coord_t>(sum_x / area6),
                  static_cast<coord_t>(sum_y / area6));
 }
