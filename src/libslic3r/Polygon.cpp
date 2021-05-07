@@ -169,19 +169,26 @@ void Polygon::triangulate_convex(Polygons* polygons) const
 }
 
 // center of mass
+// source: https://en.wikipedia.org/wiki/Centroid
 Point Polygon::centroid() const
 {
-    double area_temp = this->area();
-    double x_temp = 0;
-    double y_temp = 0;
-    
-    Polyline polyline = this->split_at_first_point();
-    for (Points::const_iterator point = polyline.points.begin(); point != polyline.points.end() - 1; ++point) {
-        x_temp += (double)( point->x() + (point+1)->x() ) * ( (double)point->x()*(point+1)->y() - (double)(point+1)->x()*point->y() );
-        y_temp += (double)( point->y() + (point+1)->y() ) * ( (double)point->x()*(point+1)->y() - (double)(point+1)->x()*point->y() );
+    double sum_x     = 0.;
+    double sum_y     = 0.;
+    double half_area = 0.;
+    auto   add       = [&](const Point &p1, const Point &p2) {
+        Vec2d  p1d  = p1.cast<double>();
+        double area = p1d.x() * p2.y() - p1d.y() * p2.x();
+        sum_x += (p1d.x() + p2.x()) * area;
+        sum_y += (p1d.y() + p2.y()) * area;
+        half_area += area;
+    };
+    for (size_t i = 1; i < points.size(); i++) {
+        add(points[i - 1], points[i]);
     }
-    
-    return Point(x_temp/(6*area_temp), y_temp/(6*area_temp));
+    add(points.back(), points.front());
+    double area6 = half_area * 3;
+    return Point(static_cast<coord_t>(sum_x / area6),
+                 static_cast<coord_t>(sum_y / area6));
 }
 
 // find all concave vertices (i.e. having an internal angle greater than the supplied angle)

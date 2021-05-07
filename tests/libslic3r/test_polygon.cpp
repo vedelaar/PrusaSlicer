@@ -42,3 +42,15 @@ SCENARIO("Remove collinear points from Polygon", "[Polygon]") {
         }
     }
 }
+
+TEST_CASE("Centroid of Trapezoid must be inside", "[Polygon][Utils]")
+{
+    Slic3r::Polygon trapezoid({
+        Point(4702134, 1124765853),
+        Point(-4702134, 1124765853), 
+        Point(-9404268, 1049531706),
+        Point(9404268, 1049531706)
+        });
+    Point centroid = trapezoid.centroid();
+    CHECK(trapezoid.contains(centroid));
+}
