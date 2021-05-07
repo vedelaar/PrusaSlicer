@@ -183,8 +183,10 @@ Point Polygon::centroid() const
         sum_y += (p1d.y() + p2.y()) * area;
         twice_area += area;
     };
-    for (size_t i = 1; i < points.size(); i++) {
-        add(points[i - 1], points[i]);
+
+    for (Points::const_iterator point = points.begin();
+         point != points.end() - 1; ++point) {
+        add(*point, *(point+1));
     }
     add(points.back(), points.front());
 
