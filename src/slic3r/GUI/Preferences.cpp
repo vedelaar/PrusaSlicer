@@ -356,6 +356,14 @@ void PreferencesDialog::build()
 		def.set_default_value(new ConfigOptionBool{ app_config->get("use_custom_toolbar_size") == "1" });
 		option = Option(def, "use_custom_toolbar_size");
 		m_optgroup_gui->append_single_option_line(option);
+
+
+		def.label = L("Show \"Did you know\" hints");
+		def.type = coBool;
+		def.tooltip = L("If enabled, useful hints are displayed at startup.");
+		def.set_default_value(new ConfigOptionBool{ app_config->get("show_hints") == "1" });
+		option = Option(def, "show_hints");
+		m_optgroup_gui->append_single_option_line(option);
 	}
 
 	activate_options_tab(m_optgroup_gui);

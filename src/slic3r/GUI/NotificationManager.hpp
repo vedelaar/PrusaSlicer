@@ -89,8 +89,9 @@ enum class NotificationType
     UndoDesktopIntegrationSuccess,
     UndoDesktopIntegrationFail,
     // Notification that a printer has more extruders than are supported by MM Gizmo/segmentation.
-    MmSegmentationExceededExtrudersLimit
-
+    MmSegmentationExceededExtrudersLimit,
+	// Did you know Notification appearing on startup with arrows to change hint
+	DidYouKnowHint
 };
 
 class NotificationManager
@@ -160,6 +161,8 @@ public:
 	void set_upload_job_notification_percentage(int id, const std::string& filename, const std::string& host, float percentage);
 	void upload_job_notification_show_canceled(int id, const std::string& filename, const std::string& host);
 	void upload_job_notification_show_error(int id, const std::string& filename, const std::string& host);
+	// Hint (did you know) notification
+	void push_hint_notification();
 	// Close old notification ExportFinished.
 	void new_export_began(bool on_removable);
 	// finds ExportFinished notification and closes it if it was to removable device
@@ -478,6 +481,9 @@ private:
 		// local time of last hover for showing tooltip
 		long      m_hover_time { 0 };
 	};
+
+	// in HintNotification.hpp
+	class HintNotification;
 
 	//pushes notification into the queue of notifications that are rendered
 	//can be used to create custom notification

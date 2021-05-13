@@ -54,6 +54,11 @@ static const std::map<const char, std::string> font_icons_large = {
     {ImGui::ErrorMarker            , "notification_error"            },
     {ImGui::CancelButton           , "notification_cancel"           },
     {ImGui::CancelHoverButton      , "notification_cancel_hover"     },
+    {ImGui::LeftArrowButton        , "notification_left"             },
+    {ImGui::LeftArrowHoverButton   , "notification_left_hover"       },
+    {ImGui::RightArrowButton       , "notification_right"            },
+    {ImGui::RightArrowHoverButton  , "notification_right_hover"      },
+   
 };
 
 const ImVec4 ImGuiWrapper::COL_GREY_DARK         = { 0.333f, 0.333f, 0.333f, 1.0f };
