@@ -11,14 +11,14 @@
 namespace Slic3r {
 namespace GUI {
 
-PreferencesDialog::PreferencesDialog(wxWindow* parent) : 
+PreferencesDialog::PreferencesDialog(wxWindow* parent, int selected_tab) :
     DPIDialog(parent, wxID_ANY, _L("Preferences"), wxDefaultPosition, 
               wxDefaultSize, wxDEFAULT_DIALOG_STYLE)
 {
 #ifdef __WXOSX__
     isOSX = true;
 #endif
-	build();
+	build(selected_tab);
 }
 
 static std::shared_ptr<ConfigOptionsGroup>create_options_tab(const wxString& title, wxBookCtrlBase* tabs)
@@ -44,7 +44,7 @@ static void activate_options_tab(std::shared_ptr<ConfigOptionsGroup> optgroup)
 	sizer->Add(optgroup->sizer, 0, wxEXPAND | wxALL, 10);
 }
 
-void PreferencesDialog::build()
+void PreferencesDialog::build(size_t selected_tab)
 {
 #ifdef _WIN32
 	wxGetApp().UpdateDarkUI(this);
@@ -358,7 +358,7 @@ void PreferencesDialog::build()
 		m_optgroup_gui->append_single_option_line(option);
 
 
-		def.label = L("Show \"Did you know\" hints");
+		def.label = L("Show \"Did you know\" hints after start");
 		def.type = coBool;
 		def.tooltip = L("If enabled, useful hints are displayed at startup.");
 		def.set_default_value(new ConfigOptionBool{ app_config->get("show_hints") == "1" });
@@ -394,6 +394,9 @@ void PreferencesDialog::build()
 		activate_options_tab(m_optgroup_render);
 	}
 #endif // ENABLE_ENVIRONMENT_MAP
+
+	if (selected_tab < tabs->GetPageCount())
+		tabs->SetSelection(selected_tab);
 
 	auto sizer = new wxBoxSizer(wxVERTICAL);
 	sizer->Add(tabs, 1, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, 5);

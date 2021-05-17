@@ -1,6 +1,11 @@
 #include "HintNotification.hpp"
 #include "ImGuiWrapper.hpp"
 #include "libslic3r/AppConfig.hpp"
+#include "libslic3r/utils.hpp"
+
+#include <boost/filesystem.hpp>
+#include <boost/property_tree/ini_parser.hpp>
+#include <map>
 
 namespace Slic3r {
 namespace GUI {
@@ -17,9 +22,50 @@ static inline void push_style_color(ImGuiCol idx, const ImVec4& col, bool fading
 
 void HintDatabase::init()
 {
+		
+	load_hints_from_file(std::move(boost::filesystem::path(resources_dir()) / "data" / "hints.ini"));
+		
 	const AppConfig* app_config = wxGetApp().app_config;
 	m_hint_id = std::atoi(app_config->get("last_hint").c_str());
     m_initialized = true;
+
+}
+void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
+{
+	namespace pt = boost::property_tree;
+	pt::ptree tree;
+ 	boost::nowide::ifstream ifs(path.string());
+	try {
+		pt::read_ini(ifs, tree);
+	}
+	catch (const boost::property_tree::ini_parser::ini_parser_error& err) {
+		throw Slic3r::RuntimeError(format("Failed loading hints file \"%1%\"\nError: \"%2%\" at line %3%", path, err.message(), err.line()).c_str());
+	}
+
+ 	for (const auto& section : tree) {
+		if (boost::starts_with(section.first, "hint:")) {
+			// create std::map with tree data 
+			std::map<std::string, std::string> dict;
+			for (const auto& data : section.second) {
+				dict.emplace(data.first, data.second.data());
+			}
+			
+			// create HintData
+			if (dict.find("hypertext_type") != dict.end()) {
+				if(dict["hypertext_type"] == "link") {
+					std::string hypertext_link = dict["hypertext_link"];
+					HintData hint_data{ dict["text"], dict["hypertext"], [hypertext_link]() { wxLaunchDefaultBrowser(hypertext_link); }  };
+					m_loaded_hints.emplace_back(hint_data);
+				} else if (dict["hypertext_type"] == "settings") {
+					std::string		opt = dict["hypertext_settings_opt"];
+					Preset::Type	type = static_cast<Preset::Type>(std::atoi(dict["hypertext_settings_type"].c_str()));
+					std::wstring	category = boost::nowide::widen(dict["hypertext_settings_category"]);
+					HintData hint_data{ dict["text"], dict["hypertext"], [opt, type, category]() { GUI::wxGetApp().sidebar().jump_to_option(opt, type, category); } };
+					m_loaded_hints.emplace_back(hint_data);
+				}
+			} 
+		}
+	}
 }
 bool HintDatabase::get_hint(HintData& data, bool up)
 {
@@ -28,15 +74,15 @@ bool HintDatabase::get_hint(HintData& data, bool up)
         //return false;
     }
     // shift id
-    m_hint_id = (up ? m_hint_id + 1 : (m_hint_id == 0 ? m_hints_collection.size() - 1 : m_hint_id - 1));
-    m_hint_id %= m_hints_collection.size();
+    m_hint_id = (up ? m_hint_id + 1 : (m_hint_id == 0 ? m_loaded_hints.size() - 1 : m_hint_id - 1));
+    m_hint_id %= m_loaded_hints.size();
 
 	AppConfig* app_config = wxGetApp().app_config;
 	app_config->set("last_hint", std::to_string(m_hint_id));
 
-    data.text = m_hints_collection[m_hint_id].text;
-    data.hypertext = m_hints_collection[m_hint_id].hypertext;
-    data.callback = m_hints_collection[m_hint_id].callback;
+    data.text = m_loaded_hints[m_hint_id].text;
+    data.hypertext = m_loaded_hints[m_hint_id].hypertext;
+    data.callback = m_loaded_hints[m_hint_id].callback;
 
     return true;
 }
@@ -46,12 +92,16 @@ void NotificationManager::HintNotification::count_spaces()
 	//determine line width 
 	m_line_height = ImGui::CalcTextSize("A").y;
 
+	/*
 	std::string text;
-	text = ImGui::ErrorMarker; // TODO change to left arrow 
+	text = ImGui::LeftArrowButton; // TODO change to left arrow 
 	float picture_width = ImGui::CalcTextSize(text.c_str()).x;
 	m_left_indentation = picture_width + m_line_height / 2;
+	*/
+	// no left arrow
+	m_left_indentation = m_line_height;
 
-	m_window_width_offset = m_left_indentation + m_line_height * 5.5f;
+	m_window_width_offset = m_left_indentation + m_line_height * /*3.f;*/ 5.5f; // no right arrow
 	m_window_width = m_line_height * 25;
 }
 
@@ -63,6 +113,8 @@ void NotificationManager::HintNotification::init()
 
 	count_spaces();
 	count_lines();
+
+	m_multiline = true;
 
 	m_notification_start = GLCanvas3D::timestamp_now();
 	if (m_state == EState::Unknown)
@@ -78,10 +130,14 @@ void NotificationManager::HintNotification::close()
 
 void NotificationManager::HintNotification::set_next_window_size(ImGuiWrapper& imgui)
 {
+	/*
 	m_window_height = m_multiline ?
-		(m_lines_count + 1.5f) * m_line_height :
-		3.5f * m_line_height;
+		(m_lines_count + 1.f) * m_line_height :
+		4.f * m_line_height;
 	m_window_height += 1 * m_line_height; // top and bottom
+	*/
+
+	m_window_height = std::max((m_lines_count + 1.f) * m_line_height, 5.f * m_line_height);
 }
 
 bool NotificationManager::HintNotification::on_text_click()
@@ -97,8 +153,9 @@ void NotificationManager::HintNotification::render_text(ImGuiWrapper& imgui, con
         retrieve_data();
 
 	render_right_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
-	render_left_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
+	//render_left_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
     //PopNotification::render_text(imgui, win_size_x, win_size_y, win_pos_x,  win_pos_y);
+	render_settings_button(imgui, win_size_x, win_size_y);
 
 	float	x_offset = m_left_indentation;
 	int		last_end = 0;
@@ -136,13 +193,53 @@ void NotificationManager::HintNotification::render_text(ImGuiWrapper& imgui, con
 		render_hypertext(imgui, x_offset + ImGui::CalcTextSize((line + " ").c_str()).x, starting_y + (m_lines_count - 1) * shift_y, m_hypertext);
 	}
 
+	// Do not show again checkbox
+	/*
 	ImGui::SetCursorPosX(x_offset);
 	if (m_lines_count > 2 && m_multiline)
 		ImGui::SetCursorPosY(starting_y + (m_lines_count + 0.25f) * shift_y);
 	else
 		ImGui::SetCursorPosY(starting_y + 2.25f * shift_y);
 	ImGui::Checkbox("Do not show again.", &m_checkbox);
+	*/
 }
+
+void NotificationManager::HintNotification::render_settings_button(ImGuiWrapper& imgui,
+	const float win_pos_x, const float win_pos_y)
+{
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.0f, .0f, .0f, .0f));
+	NotificationsInternal::push_style_color(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg), m_state == EState::FadingOut, m_current_fade_opacity);
+	NotificationsInternal::push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	NotificationsInternal::push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+
+
+	//button - if part if treggered
+	std::string button_text;
+	button_text = ImGui::MinimalizeButton;
+	if (ImGui::IsMouseHoveringRect(ImVec2(win_pos_x - m_window_width / 10.f, win_pos_y + m_window_height - 2 * m_line_height + 1),
+		ImVec2(win_pos_x, win_pos_y + m_window_height),
+		true))
+	{
+		button_text = ImGui::MinimalizeHoverButton;
+	}
+	ImVec2 button_pic_size = ImGui::CalcTextSize(button_text.c_str());
+	ImVec2 button_size(button_pic_size.x * 1.25f, button_pic_size.y * 1.25f);
+	ImGui::SetCursorPosX(m_window_width - m_line_height * 1.8f);
+	ImGui::SetCursorPosY(m_window_height - button_size.y - 5);
+	if (imgui.button(button_text.c_str(), button_size.x, button_size.y))
+	{
+		wxGetApp().open_preferences(2);
+	}
+
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	m_minimize_b_visible = true;
+}
+
 void NotificationManager::HintNotification::render_right_arrow_button(ImGuiWrapper& imgui, const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
 {
 	ImVec2 win_size(win_size_x, win_size_y);
