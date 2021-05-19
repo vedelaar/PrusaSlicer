@@ -11,7 +11,7 @@ struct HintData
 {
 	std::string        text;
 	std::string        hypertext;
-	std::function<void(void/*wxEvtHandler**/)> callback{ nullptr };
+	std::function<void(void)> callback{ nullptr };
 };
 
 class HintDatabase
@@ -38,25 +38,29 @@ private:
 	void	load_hints_from_file(const boost::filesystem::path& path);
 	size_t						m_hint_id;
 	bool						m_initialized { false };
+	/*
 	const std::vector<HintData> m_hints_collection = {
 		{ _u8L("Hint with short text.") },
 		{ _u8L("Hint with quite long text. Second sentence of that long text.\n This sentence starts on new line. And this is last sentence.") },
 		{ _u8L("Hint with long text. And with link to knowledge base.\nThis sentence starts on new line. And this is last sentence ending with a link: "), _u8L("Link"),
-			[](/*wxEvtHandler* evnthndlr*/) { wxLaunchDefaultBrowser("https://www.help.prusa3d.com/en/article/layers-and-perimeters_1748"); } },
+			[]() { wxLaunchDefaultBrowser("https://www.help.prusa3d.com/en/article/layers-and-perimeters_1748"); } },
 		{ _u8L("Hint with short text and link to print settings: "), _u8L("Fill patern"), 
-			[](/*wxEvtHandler* evnthndlr*/) { 
-			GUI::wxGetApp().sidebar().jump_to_option("fill_pattern", Preset::Type::TYPE_PRINT, L"Infill");
-			/*wxLaunchDefaultBrowser("https://www.help.prusa3d.com/en/article/first-print-with-prusaslicer_1753");*/ } },
+			[]() { 
+			GUI::wxGetApp().sidebar().jump_to_option("fill_pattern", Preset::Type::TYPE_PRINT, L"Infill"); } },
 	};
+	*/
 	std::vector<HintData> m_loaded_hints;
+	// Example of ini file with hints:
 	/*
-	* [hint:0]
+		#hint with internet link
+	    [hint:0]
 		text = text1
 		hypertext_type = link
 		hypertext = link here
 		hypertext_link = https://www.help.prusa3d.com/en/article/layers-and-perimeters_1748
 
-	  [hint:1]
+		#hint with hyperlink to settings
+	    [hint:1]
 		text = text2
 		hypertext_type = settings
 		hypertext = settings here
@@ -83,6 +87,9 @@ protected:
 	virtual void	render_text(ImGuiWrapper& imgui,
 								const float win_size_x, const float win_size_y,
 								const float win_pos_x, const float win_pos_y) override;
+	virtual void	render_close_button(ImGuiWrapper& imgui,
+								const float win_size_x, const float win_size_y,
+								const float win_pos_x, const float win_pos_y) override;
 	virtual void	render_minimize_button(ImGuiWrapper& imgui,
 								const float win_pos_x, const float win_pos_y) override {}
 	void			render_settings_button(ImGuiWrapper& imgui,
@@ -99,6 +106,9 @@ protected:
 	bool	m_has_hint_data { false };
 	bool	m_checkbox		{ false };
 	std::function<void(void/*wxEvtHandler**/)> m_hypertext_callback;
+
+	float m_close_b_y { 0 };
+	float m_close_b_w { 0 };
 };
 
 } //namespace Slic3r 

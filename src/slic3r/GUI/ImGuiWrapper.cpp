@@ -43,7 +43,9 @@ static const std::map<const char, std::string> font_icons = {
     {ImGui::FilamentIconMarker    , "spool"                         },
     {ImGui::MaterialIconMarker    , "resin"                         },
     {ImGui::MinimalizeButton      , "notification_minimalize"       },
-    {ImGui::MinimalizeHoverButton , "notification_minimalize_hover" }
+    {ImGui::MinimalizeHoverButton , "notification_minimalize_hover" },
+    {ImGui::RightArrowButton      , "notification_right"            },
+    {ImGui::RightArrowHoverButton , "notification_right_hover"      },
 };
 static const std::map<const char, std::string> font_icons_large = {
     {ImGui::CloseNotifButton       , "notification_close"            },
@@ -56,8 +58,6 @@ static const std::map<const char, std::string> font_icons_large = {
     {ImGui::CancelHoverButton      , "notification_cancel_hover"     },
     {ImGui::LeftArrowButton        , "notification_left"             },
     {ImGui::LeftArrowHoverButton   , "notification_left_hover"       },
-    {ImGui::RightArrowButton       , "notification_right"            },
-    {ImGui::RightArrowHoverButton  , "notification_right_hover"      },
    
 };
 
