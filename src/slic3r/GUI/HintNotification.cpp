@@ -1,7 +1,7 @@
 #include "HintNotification.hpp"
 #include "ImGuiWrapper.hpp"
 #include "libslic3r/AppConfig.hpp"
-#include "libslic3r/utils.hpp"
+#include "libslic3r/Utils.hpp"
 #include "libslic3r/Config.hpp"
 
 #include <boost/filesystem.hpp>
