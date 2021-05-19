@@ -1,5 +1,6 @@
 #include "HintNotification.hpp"
 #include "ImGuiWrapper.hpp"
+#include "format.hpp"
 #include "libslic3r/AppConfig.hpp"
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Config.hpp"
