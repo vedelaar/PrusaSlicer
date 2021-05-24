@@ -869,6 +869,21 @@ void GLToolbar::update_hover_state_vertical(const Vec2d& mouse_pos, GLCanvas3D& 
     }
 }
 
+GLToolbarItem* GLToolbar::get_item(const std::string& item_name)
+{
+    if (!m_enabled)
+        return nullptr;
+
+    for (GLToolbarItem* item : m_items)
+    {
+        if (item->get_name() == item_name)   
+        {
+            return item;
+        }
+    }
+    return nullptr;
+}
+
 int GLToolbar::contains_mouse(const Vec2d& mouse_pos, const GLCanvas3D& parent) const
 {
     if (!m_enabled)
@@ -1217,6 +1232,8 @@ bool GLToolbar::generate_icons_texture()
         states.push_back({ 0, false }); // Hover
         states.push_back({ 0, false }); // HoverPressed
         states.push_back({ 2, false }); // HoverDisabled
+        states.push_back({ 0, false }); // HighlightedShown
+        states.push_back({ 2, false }); // HighlightedHidden
     }
     else {
         states.push_back({ 1, false }); // Normal
@@ -1225,6 +1242,8 @@ bool GLToolbar::generate_icons_texture()
         states.push_back({ 0, false }); // Hover
         states.push_back({ 1, true });  // HoverPressed
         states.push_back({ 1, false }); // HoverDisabled
+        states.push_back({ 0, false }); // HighlightedShown
+        states.push_back({ 1, false }); // HighlightedHidden
     }
 
     unsigned int sprite_size_px = (unsigned int)(m_layout.icons_size * m_layout.scale);

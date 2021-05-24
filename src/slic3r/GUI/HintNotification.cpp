@@ -57,18 +57,32 @@ void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
 			unescape_string_cstyle(dict["text"], text);
 			// create HintData
 			if (dict.find("hypertext_type") != dict.end()) {
+				//link to internet
 				if(dict["hypertext_type"] == "link") {
-					std::string hypertext_link = dict["hypertext_link"];
-					HintData hint_data{ text, dict["hypertext"], [hypertext_link]() { wxLaunchDefaultBrowser(hypertext_link); }  };
+					std::string	hypertext_link = dict["hypertext_link"];
+					HintData	hint_data{ text, dict["hypertext"], [hypertext_link]() { wxLaunchDefaultBrowser(hypertext_link); }  };
 					m_loaded_hints.emplace_back(hint_data);
+				// highlight settings
 				} else if (dict["hypertext_type"] == "settings") {
 					std::string		opt = dict["hypertext_settings_opt"];
 					Preset::Type	type = static_cast<Preset::Type>(std::atoi(dict["hypertext_settings_type"].c_str()));
 					std::wstring	category = boost::nowide::widen(dict["hypertext_settings_category"]);
-					HintData hint_data{ text, dict["hypertext"], [opt, type, category]() { GUI::wxGetApp().sidebar().jump_to_option(opt, type, category); } };
+					HintData		hint_data{ text, dict["hypertext"], [opt, type, category]() { GUI::wxGetApp().sidebar().jump_to_option(opt, type, category); } };
 					m_loaded_hints.emplace_back(hint_data);
-				} 
+				// open preferences
+				} else if(dict["hypertext_type"] == "preferences") {
+					int			page = static_cast<Preset::Type>(std::atoi(dict["hypertext_preferences_page"].c_str()));
+					HintData	hint_data{ text, dict["hypertext"], [page]() { wxGetApp().open_preferences(page); } };
+					m_loaded_hints.emplace_back(hint_data);
+
+				} else if (dict["hypertext_type"] == "plater") {
+					std::string	item = dict["hypertext_plater_item"];
+					HintData	hint_data{ text, dict["hypertext"], [item]() { GUI::wxGetApp().plater()->canvas3D()->highlight_toolbar_item(item); } };
+					
+					m_loaded_hints.emplace_back(hint_data);
+				}
 			} else {
+				// plain text without hypertext
 				HintData hint_data{ text };
 				m_loaded_hints.emplace_back(hint_data);
 			}
@@ -160,9 +174,9 @@ void NotificationManager::HintNotification::render_text(ImGuiWrapper& imgui, con
     if (!m_has_hint_data)
         retrieve_data();
 
-	//render_right_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
+	render_right_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
 	render_left_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
-	render_settings_button(imgui, win_size_x, win_size_y);
+	render_preferences_button(imgui, win_pos_x, win_pos_y);
 	//NotificationManager::PopNotification::render_text(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
 
 	float	x_offset = m_left_indentation;
@@ -263,7 +277,7 @@ void NotificationManager::HintNotification::render_close_button(ImGuiWrapper& im
 	ImGui::PopStyleColor();
 }
 
-void NotificationManager::HintNotification::render_settings_button(ImGuiWrapper& imgui, const float win_pos_x, const float win_pos_y)
+void NotificationManager::HintNotification::render_preferences_button(ImGuiWrapper& imgui, const float win_pos_x, const float win_pos_y)
 {
 	
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
@@ -275,14 +289,12 @@ void NotificationManager::HintNotification::render_settings_button(ImGuiWrapper&
 	std::string button_text;
 	button_text = ImGui::MinimalizeButton;
 	//hover
-	/*
 	if (ImGui::IsMouseHoveringRect(ImVec2(win_pos_x - m_window_width / 10.f, win_pos_y + m_window_height - 2 * m_line_height + 1),
 		ImVec2(win_pos_x, win_pos_y + m_window_height),
 		true))
 	{
 		button_text = ImGui::MinimalizeHoverButton;
 	}
-	*/
 
 	ImVec2 button_pic_size = ImGui::CalcTextSize(button_text.c_str());
 	ImVec2 button_size(button_pic_size.x * 1.25f, button_pic_size.y * 1.25f);
@@ -329,10 +341,13 @@ void NotificationManager::HintNotification::render_right_arrow_button(ImGuiWrapp
 	
 	ImVec2 button_pic_size = ImGui::CalcTextSize(button_text.c_str());
 	ImVec2 button_size(button_pic_size.x * 1.25f, button_pic_size.y * 1.25f);
-	ImGui::SetCursorPosX(win_size.x - m_line_height * 5.0f);
-	ImGui::SetCursorPosY(win_size.y / 2 - button_size.y);
-	//ImGui::SetCursorPosX(win_size.x - m_line_height * 2.65f);
-	//ImGui::SetCursorPosY(m_close_b_y + m_close_b_w + 20);
+	//ImGui::SetCursorPosX(win_size.x - m_line_height * 5.0f);
+	//ImGui::SetCursorPosY(win_size.y / 2 - button_size.y);
+	ImGui::SetCursorPosX(m_window_width - m_line_height * 3.f);
+	if (m_lines_count <= 3)
+		ImGui::SetCursorPosY(m_close_b_y + m_close_b_w + 20);
+	else
+		ImGui::SetCursorPosY(m_window_height - button_size.y - 5);
 	if (imgui.button(button_text.c_str(), button_size.x * 0.8f, button_size.y * 1.f))
 	{
 		retrieve_data();

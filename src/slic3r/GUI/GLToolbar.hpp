@@ -62,6 +62,8 @@ public:
         Hover,
         HoverPressed,
         HoverDisabled,
+        HighlightedShown,
+        HighlightedHidden,
         Num_States
     };
 
@@ -312,7 +314,8 @@ public:
     void render(const GLCanvas3D& parent);
 
     bool on_mouse(wxMouseEvent& evt, GLCanvas3D& parent);
-
+    // get item pointer for highlighter timer
+    GLToolbarItem* get_item(const std::string& item_name);
 private:
     void calc_layout();
     float get_width_horizontal() const;
