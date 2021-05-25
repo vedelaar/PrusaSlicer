@@ -6550,10 +6550,14 @@ void GLCanvas3D::ToolbarHighlighter::invalidate()
 void GLCanvas3D::ToolbarHighlighter::blink()
 {
     if (m_toolbar_item) {
-        if (m_toolbar_item->get_state() != GLToolbarItem::EState::HighlightedShown)
+        char state = m_toolbar_item->get_state();
+        if (state != (char)GLToolbarItem::EState::HighlightedHidden && state != (char)GLToolbarItem::EState::HighlightedShown)
+            m_item_state = state;
+        if (state != (char)GLToolbarItem::EState::HighlightedShown)
             m_toolbar_item->set_state(GLToolbarItem::EState::HighlightedShown);
-        else
+        else 
             m_toolbar_item->set_state(GLToolbarItem::EState::HighlightedHidden);
+        
         m_canvas->set_as_dirty();
     }
     else

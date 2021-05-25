@@ -129,6 +129,7 @@ public:
     bool is_pressed() const { return (m_state == Pressed) || (m_state == HoverPressed); }
     bool is_visible() const { return m_data.visible; }
     bool is_separator() const { return m_type == Separator; }
+    bool is_highlighted() const { return (m_state == HighlightedShown) || (m_state == HighlightedHidden); }
 
     bool is_left_toggable() const { return m_data.left.toggable; }
     bool is_right_toggable() const { return m_data.right.toggable; }

@@ -76,6 +76,8 @@ bool GLToolbarItem::update_visibility()
 
 bool GLToolbarItem::update_enabled_state()
 {
+    if (is_highlighted())
+        return false; //if highlighted, we dont want to change state until highlight ends.
     bool enabled = m_data.enabling_callback();
     bool ret = (is_enabled() != enabled);
     if (ret)
