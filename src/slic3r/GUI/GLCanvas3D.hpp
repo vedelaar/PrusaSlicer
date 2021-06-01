@@ -547,13 +547,14 @@ private:
         void init(GLToolbarItem* toolbar_item, GLCanvas3D* canvas);
         void blink();
         void invalidate();
-
-    private:
+        bool                m_render_arrow{ false };
         GLToolbarItem*      m_toolbar_item{ nullptr };
+    private:
         GLCanvas3D*         m_canvas{ nullptr };
         int				    m_blink_counter{ 0 };
         HighlighterTimer    m_timer;
         char                m_item_state{ 0 };
+       
     }
     m_toolbar_highlighter;
 

@@ -146,7 +146,7 @@ public:
     bool update_enabled_state();
 
     void render(unsigned int tex_id, float left, float right, float bottom, float top, unsigned int tex_width, unsigned int tex_height, unsigned int icon_size) const;
-
+    void render_arrow(unsigned int tex_id, float left, float right, float bottom, float top, unsigned int tex_width, unsigned int tex_height, unsigned int icon_size) const;
 private:
     void set_visible(bool visible) { m_data.visible = visible; }
 
@@ -239,6 +239,7 @@ private:
     GLTexture m_icons_texture;
     bool m_icons_texture_dirty;
     BackgroundTexture m_background_texture;
+    BackgroundTexture m_arrow_texture;
     Layout m_layout;
 
     ItemsList m_items;
@@ -264,6 +265,8 @@ public:
     ~GLToolbar();
 
     bool init(const BackgroundTexture::Metadata& background_texture);
+
+    bool init_arrow(const BackgroundTexture::Metadata& arrow_texture);
 
     Layout::EType get_layout_type() const;
     void set_layout_type(Layout::EType type);
@@ -313,6 +316,7 @@ public:
     bool update_items_state();
 
     void render(const GLCanvas3D& parent);
+    void render_arrow(const GLCanvas3D& parent, GLToolbarItem* highlighted_item) const;
 
     bool on_mouse(wxMouseEvent& evt, GLCanvas3D& parent);
     // get item pointer for highlighter timer
