@@ -18,6 +18,7 @@
 #include <boost/property_tree/ptree_fwd.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/format/format_fwd.hpp>
+#include <boost/log/trivial.hpp>
 
 //#include <wx/string.h>
 //#include "I18N.hpp"
@@ -171,15 +172,67 @@ void AppConfig::set_defaults()
     erase("", "object_settings_size");
 }
 
-std::string AppConfig::load()
+bool is_config_file_parsable(const std::string &config_path)
+{
+    namespace pt = boost::property_tree;
+    pt::ptree               tree;
+    boost::nowide::ifstream ifs(config_path);
+    try {
+        pt::read_ini(ifs, tree);
+    } catch (pt::ptree_error &ex) {
+        return false;
+    }
+    return true;
+}
+
+std::pair<bool, std::string> AppConfig::load()
 {
     // 1) Read the complete config file into a boost::property_tree.
     namespace pt = boost::property_tree;
     pt::ptree tree;
     boost::nowide::ifstream ifs(AppConfig::config_path());
+
+    // Indicated that backup was restored, but it is not the latest one.
+    bool old_backup_restored = false;
+
     try {
         pt::read_ini(ifs, tree);
     } catch (pt::ptree_error& ex) {
+#ifdef WIN32
+        // The configuration file is corrupted, try replacing it with the backup configuration.
+        std::string backup_path = (boost::format("%1%.bak") % AppConfig::config_path()).str();
+        if (boost::filesystem::exists(backup_path)) {
+            if (!is_config_file_parsable(backup_path))
+                return std::make_pair(false, "The backup configuration is corrupted.");
+
+            ifs.close();
+
+            if (GetFileAttributesW(boost::nowide::widen(backup_path).c_str()) & FILE_ATTRIBUTE_HIDDEN)
+                old_backup_restored = true;
+
+            // Unhide the backup of the configuration to ensure that the configuration file will not be also hidden after calling copy_file().
+            if (old_backup_restored)
+                SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_NORMAL);
+
+            std::string error_message;
+            if (copy_file(backup_path, AppConfig::config_path(), error_message, true) != SUCCESS) {
+                if (old_backup_restored)
+                    SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_HIDDEN);
+
+                return std::make_pair(false, "Restoring of the backup configuration failed.");
+            }
+
+            // Try parse configuration file after backup restoration.
+            ifs.open(AppConfig::config_path());
+            try {
+                pt::read_ini(ifs, tree);
+            } catch (pt::ptree_error &ex) {
+                return std::make_pair(false, ex.what());
+            }
+        } else {
+            return std::make_pair(false, ex.what());
+        }
+#endif
         // Error while parsing config file. We'll customize the error message and rethrow to be displayed.
         // ! But to avoid the use of _utf8 (related to use of wxWidgets) 
         // we will rethrow this exception from the place of load() call, if returned value wouldn't be empty
@@ -189,7 +242,9 @@ std::string AppConfig::load()
                     "Try to manually delete the file to recover from the error. Your user profiles will not be affected.")) + 
         	"\n\n" + AppConfig::config_path() + "\n\n" + ex.what());
         */
-        return ex.what();
+#ifndef WIN32
+        return std::make_pair(false, ex.what());
+#endif
     }
 
     // 2) Parse the property_tree, extract the sections and key / value pairs.
@@ -249,7 +304,7 @@ std::string AppConfig::load()
     // Override missing or keys with their defaults.
     this->set_defaults();
     m_dirty = false;
-    return "";
+    return std::make_pair(old_backup_restored, "");
 }
 
 void AppConfig::save()
@@ -292,13 +347,36 @@ void AppConfig::save()
         c << std::endl << "[" << VENDOR_PREFIX << vendor.first << "]" << std::endl;
 
         for (const auto &model : vendor.second) {
-            if (model.second.size() == 0) { continue; }
+            if (model.second.empty()) { continue; }
             const std::vector<std::string> variants(model.second.begin(), model.second.end());
             const auto escaped = escape_strings_cstyle(variants);
             c << MODEL_PREFIX << model.first << " = " << escaped << std::endl;
         }
     }
     c.close();
+    
+#ifdef WIN32
+    std::string error_message;
+    std::string backup_path = (boost::format("%1%.bak") % path).str();
+
+    // The hidden file attribute indicates the backup configuration is not current because it is the backup of some older configuration
+    // (probably because of failing the following call of copy_file()) or it is a corrupted backup.
+    SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_HIDDEN);
+
+    // Copy configuration file with PID suffix into the configuration file with "bak" suffix.
+    if (copy_file(path_pid, backup_path, error_message, true) != SUCCESS)
+        BOOST_LOG_TRIVIAL(error) << "Copying from " + path_pid + " to " + backup_path + " failed. Failed to create a backup configuration.";
+
+    // The hidden file attribute indicates that backup was not verified.
+    SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_HIDDEN);
+
+    if (!is_config_file_parsable(backup_path))
+        BOOST_LOG_TRIVIAL(error) << "The backup configuration is corrupted.";
+
+    // Now we know that backup should not be corrupted and should contain exactly the same content as configuration file fit PID suffix.
+    // So indicated this state using removing hidden file attribute.
+    SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_NORMAL);
+#endif
 
     rename_file(path_pid, path);
     m_dirty = false;
