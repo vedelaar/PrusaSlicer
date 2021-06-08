@@ -172,6 +172,7 @@ void AppConfig::set_defaults()
     erase("", "object_settings_size");
 }
 
+#ifdef WIN32
 bool is_config_file_parsable(const std::string &config_path)
 {
     namespace pt = boost::property_tree;
@@ -179,11 +180,12 @@ bool is_config_file_parsable(const std::string &config_path)
     boost::nowide::ifstream ifs(config_path);
     try {
         pt::read_ini(ifs, tree);
-    } catch (pt::ptree_error &ex) {
+    } catch (pt::ptree_error &) {
         return false;
     }
     return true;
 }
+#endif
 
 std::pair<bool, std::string> AppConfig::load()
 {
