@@ -18,7 +18,12 @@
 #include <boost/property_tree/ptree_fwd.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/format/format_fwd.hpp>
+
+#ifdef WIN32
 #include <boost/log/trivial.hpp>
+#include <boost/uuid/detail/md5.hpp>
+#include <boost/algorithm/hex.hpp>
+#endif
 
 //#include <wx/string.h>
 //#include "I18N.hpp"
@@ -173,29 +178,60 @@ void AppConfig::set_defaults()
 }
 
 #ifdef WIN32
-bool is_config_file_parsable(const std::string &config_path)
+std::string compute_md5_hash(const std::string &data)
 {
-    namespace pt = boost::property_tree;
-    pt::ptree               tree;
-    boost::nowide::ifstream ifs(config_path);
-    try {
-        pt::read_ini(ifs, tree);
-    } catch (pt::ptree_error &) {
-        return false;
+    using boost::uuids::detail::md5;
+    md5              md5_hash;
+    md5::digest_type md5_digest{};
+    std::string      md5_digest_str;
+    md5_hash.process_bytes(data.c_str(), data.size());
+    md5_hash.get_digest(md5_digest);
+    boost::algorithm::hex(md5_digest, md5_digest + std::size(md5_digest), std::back_inserter(md5_digest_str));
+    return md5_digest_str;
+};
+
+// Assume that the last line with the comment inside the config file contains a checksum and that the user didn't modify the config file.
+bool verify_config_file_checksum(boost::nowide::ifstream &ifs)
+{
+    auto read_whole_config_file = [&ifs]() -> std::string {
+        std::stringstream ss;
+        ss << ifs.rdbuf();
+        return ss.str();
+    };
+
+    ifs.seekg(0, boost::nowide::ifstream::beg);
+    std::string whole_config = read_whole_config_file();
+
+    // The checksum should be on the last line in the config file.
+    if(size_t last_comment_pos = whole_config.find_last_of('#'); last_comment_pos != std::string::npos) {
+        // Split read config into two parts, one with checksum, and the second part is part with configuration from the checksum was computed.
+        std::string config_part = whole_config.substr(0, last_comment_pos);
+        std::string config_part_hash = compute_md5_hash(config_part);
+
+        // Try to find the computed hash inside the part with checksum.
+        // When the checksum isn't found, that meant that the checksum is incorrect, the checksum was removed,
+        // or it is an older config file without the checksum.
+        if(whole_config.substr(last_comment_pos).find(config_part_hash) != std::string::npos)
+            return true;
     }
-    return true;
+    return false;
 }
 #endif
 
-std::pair<bool, std::string> AppConfig::load()
+std::string AppConfig::load()
 {
     // 1) Read the complete config file into a boost::property_tree.
     namespace pt = boost::property_tree;
     pt::ptree tree;
     boost::nowide::ifstream ifs(AppConfig::config_path());
 
-    // Indicated that backup was restored, but it is not the latest one.
-    bool old_backup_restored = false;
+#ifdef WIN32
+    // Verify the checksum of the config file without taking just for debugging purpose.
+    if(!verify_config_file_checksum(ifs))
+        BOOST_LOG_TRIVIAL(info) << "The configuration file " << AppConfig::config_path() << " has the wrong checksum or checksum is missing.";
+
+    ifs.seekg(0, boost::nowide::ifstream::beg);
+#endif
 
     try {
         pt::read_ini(ifs, tree);
@@ -204,35 +240,32 @@ std::pair<bool, std::string> AppConfig::load()
         // The configuration file is corrupted, try replacing it with the backup configuration.
         std::string backup_path = (boost::format("%1%.bak") % AppConfig::config_path()).str();
         if (boost::filesystem::exists(backup_path)) {
-            if (!is_config_file_parsable(backup_path))
-                return std::make_pair(false, "The backup configuration is corrupted.");
+            // Compute checksum of the configuration backup file and try to load configuration from it when the checksum is correct.
+            boost::nowide::ifstream backup_ifs(backup_path);
+            if (!verify_config_file_checksum(backup_ifs))
+                return "The backup configuration is also corrupted. It isn't possible to restore the configuration from the backup.";
 
             ifs.close();
 
-            if (GetFileAttributesW(boost::nowide::widen(backup_path).c_str()) & FILE_ATTRIBUTE_HIDDEN)
-                old_backup_restored = true;
-
-            // Unhide the backup of the configuration to ensure that the configuration file will not be also hidden after calling copy_file().
-            if (old_backup_restored)
-                SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_NORMAL);
-
             std::string error_message;
-            if (copy_file(backup_path, AppConfig::config_path(), error_message, true) != SUCCESS) {
-                if (old_backup_restored)
-                    SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_HIDDEN);
+            if (copy_file(backup_path, AppConfig::config_path(), error_message, true) != SUCCESS)
+                return "Restoring of the backup configuration failed with the following error: " + error_message;
 
-                return std::make_pair(false, "Restoring of the backup configuration failed.");
-            }
-
+            BOOST_LOG_TRIVIAL(info) << "The backup configuration " << backup_path << " was successfully restored.";
             // Try parse configuration file after backup restoration.
             ifs.open(AppConfig::config_path());
             try {
                 pt::read_ini(ifs, tree);
             } catch (pt::ptree_error &ex) {
-                return std::make_pair(false, ex.what());
+                return ex.what();
             }
         } else {
-            return std::make_pair(false, ex.what());
+            std::string error_message = "The backup configuration " + backup_path +
+                                        " is missing. It isn't possible to restore the configuration "
+                                        "from the backup. Loading the configuration fails with the following error: " +
+                                        ex.what();
+            BOOST_LOG_TRIVIAL(error) << error_message;
+            return error_message;
         }
 #endif
         // Error while parsing config file. We'll customize the error message and rethrow to be displayed.
@@ -245,7 +278,7 @@ std::pair<bool, std::string> AppConfig::load()
         	"\n\n" + AppConfig::config_path() + "\n\n" + ex.what());
         */
 #ifndef WIN32
-        return std::make_pair(false, ex.what());
+        return ex.what();
 #endif
     }
 
@@ -306,7 +339,7 @@ std::pair<bool, std::string> AppConfig::load()
     // Override missing or keys with their defaults.
     this->set_defaults();
     m_dirty = false;
-    return std::make_pair(old_backup_restored, "");
+    return "";
 }
 
 void AppConfig::save()
@@ -323,22 +356,21 @@ void AppConfig::save()
     const auto path = config_path();
     std::string path_pid = (boost::format("%1%.%2%") % path % get_current_pid()).str();
 
-    boost::nowide::ofstream c;
-    c.open(path_pid, std::ios::out | std::ios::trunc);
+    std::stringstream config_ss;
     if (m_mode == EAppMode::Editor)
-        c << "# " << Slic3r::header_slic3r_generated() << std::endl;
+        config_ss << "# " << Slic3r::header_slic3r_generated() << std::endl;
     else
-        c << "# " << Slic3r::header_gcodeviewer_generated() << std::endl;
+        config_ss << "# " << Slic3r::header_gcodeviewer_generated() << std::endl;
     // Make sure the "no" category is written first.
     for (const auto& kvp : m_storage[""])
-        c << kvp.first << " = " << kvp.second << std::endl;
+        config_ss << kvp.first << " = " << kvp.second << std::endl;
     // Write the other categories.
     for (const auto& category : m_storage) {
     	if (category.first.empty())
     		continue;
-    	c << std::endl << "[" << category.first << "]" << std::endl;
+        config_ss << std::endl << "[" << category.first << "]" << std::endl;
         for (const auto& kvp : category.second)
-	        c << kvp.first << " = " << kvp.second << std::endl;
+            config_ss << kvp.first << " = " << kvp.second << std::endl;
 	}
     // Write vendor sections
     for (const auto &vendor : m_vendors) {
@@ -346,38 +378,32 @@ void AppConfig::save()
         for (const auto &model : vendor.second) { size_sum += model.second.size(); }
         if (size_sum == 0) { continue; }
 
-        c << std::endl << "[" << VENDOR_PREFIX << vendor.first << "]" << std::endl;
+        config_ss << std::endl << "[" << VENDOR_PREFIX << vendor.first << "]" << std::endl;
 
         for (const auto &model : vendor.second) {
             if (model.second.empty()) { continue; }
             const std::vector<std::string> variants(model.second.begin(), model.second.end());
             const auto escaped = escape_strings_cstyle(variants);
-            c << MODEL_PREFIX << model.first << " = " << escaped << std::endl;
+            config_ss << MODEL_PREFIX << model.first << " = " << escaped << std::endl;
         }
     }
+
+    std::string config_str = config_ss.str();
+    boost::nowide::ofstream c;
+    c.open(path_pid, std::ios::out | std::ios::trunc);
+    c << config_str;
+#ifdef WIN32
+    c << "# " << compute_md5_hash(config_str) << std::endl;
+#endif
     c.close();
     
 #ifdef WIN32
     std::string error_message;
     std::string backup_path = (boost::format("%1%.bak") % path).str();
 
-    // The hidden file attribute indicates the backup configuration is not current because it is the backup of some older configuration
-    // (probably because of failing the following call of copy_file()) or it is a corrupted backup.
-    SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_HIDDEN);
-
     // Copy configuration file with PID suffix into the configuration file with "bak" suffix.
     if (copy_file(path_pid, backup_path, error_message, true) != SUCCESS)
-        BOOST_LOG_TRIVIAL(error) << "Copying from " + path_pid + " to " + backup_path + " failed. Failed to create a backup configuration.";
-
-    // The hidden file attribute indicates that backup was not verified.
-    SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_HIDDEN);
-
-    if (!is_config_file_parsable(backup_path))
-        BOOST_LOG_TRIVIAL(error) << "The backup configuration is corrupted.";
-
-    // Now we know that backup should not be corrupted and should contain exactly the same content as configuration file fit PID suffix.
-    // So indicated this state using removing hidden file attribute.
-    SetFileAttributesW(boost::nowide::widen(backup_path).c_str(), FILE_ATTRIBUTE_NORMAL);
+        BOOST_LOG_TRIVIAL(error) << "Copying from " << path_pid << " to " << backup_path << " failed. Failed to create a backup configuration.";
 #endif
 
     rename_file(path_pid, path);

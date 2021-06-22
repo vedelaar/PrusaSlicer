@@ -730,30 +730,21 @@ void GUI_App::init_app_config()
 	// load settings
 	m_app_conf_exists = app_config->exists();
 	if (m_app_conf_exists) {
-        std::pair<bool, std::string> error = app_config->load();
-        if (!error.first && !error.second.empty()) {
+        std::string error = app_config->load();
+        if (!error.empty()) {
             // Error while parsing config file. We'll customize the error message and rethrow to be displayed.
             if (is_editor()) {
                 throw Slic3r::RuntimeError(
                     _u8L("Error parsing PrusaSlicer config file, it is probably corrupted. "
                         "Try to manually delete the file to recover from the error. Your user profiles will not be affected.") +
-                    "\n\n" + app_config->config_path() + "\n\n" + error.second);
+                    "\n\n" + app_config->config_path() + "\n\n" + error);
             }
             else {
                 throw Slic3r::RuntimeError(
                     _u8L("Error parsing PrusaGCodeViewer config file, it is probably corrupted. "
                         "Try to manually delete the file to recover from the error.") +
-                    "\n\n" + app_config->config_path() + "\n\n" + error.second);
+                    "\n\n" + app_config->config_path() + "\n\n" + error);
             }
-        } else if (error.first && error.second.empty()) {
-            if (is_editor())
-                wxMessageBox(_u8L("PrusaSlicer config file was probably corrupted and restored from an older backup, so the latest changes may not "
-                                  "be taken into account. Your user profiles are not affected."),
-                             L("PrusaSlicer configuration restored"), wxICON_WARNING);
-            else
-                wxMessageBox(_u8L("PrusaGCodeViewer config file was probably corrupted and restored from an older backup, so the latest changes "
-                                  "may not be taken into account. Your user profiles are not affected."),
-                             L("PrusaGCodeViewer configuration restored"), wxICON_WARNING);
         }
     }
 }
