@@ -4,7 +4,7 @@
 #include "Exception.hpp"
 #include "LocalesUtils.hpp"
 #include "Thread.hpp"
-
+#include "format.hpp"
 
 #include <utility>
 #include <vector>
@@ -21,12 +21,10 @@
 
 #ifdef WIN32
 #include <boost/log/trivial.hpp>
+//FIXME replace the two following includes with <boost/md5.hpp> after it becomes mainstream.
 #include <boost/uuid/detail/md5.hpp>
 #include <boost/algorithm/hex.hpp>
 #endif
-
-//#include <wx/string.h>
-//#include "I18N.hpp"
 
 namespace Slic3r {
 
@@ -178,20 +176,28 @@ void AppConfig::set_defaults()
 }
 
 #ifdef WIN32
-std::string compute_md5_hash(const std::string &data)
+static std::string appconfig_md5_hash_line(const std::string_view data)
 {
+    //FIXME replace the two following includes with <boost/md5.hpp> after it becomes mainstream.
+    // return boost::md5(data).hex_str_value();
+    // boost::uuids::detail::md5 is an internal namespace thus it may change in the future.
+    // Also this implementation is not the fastest, it was designed for short blocks of text.
     using boost::uuids::detail::md5;
     md5              md5_hash;
+    // unsigned int[4], 128 bits
     md5::digest_type md5_digest{};
     std::string      md5_digest_str;
-    md5_hash.process_bytes(data.c_str(), data.size());
+    md5_hash.process_bytes(data.data(), data.size());
     md5_hash.get_digest(md5_digest);
     boost::algorithm::hex(md5_digest, md5_digest + std::size(md5_digest), std::back_inserter(md5_digest_str));
-    return md5_digest_str;
+    // MD5 hash is 16 HEX digits long.
+    assert(md5_digest_str.size() == 32);
+    // This line will be emited at the end of the file.
+    return "# MD5 checksum " + md5_digest_str + "\n";
 };
 
 // Assume that the last line with the comment inside the config file contains a checksum and that the user didn't modify the config file.
-bool verify_config_file_checksum(boost::nowide::ifstream &ifs)
+static bool verify_config_file_checksum(boost::nowide::ifstream &ifs)
 {
     auto read_whole_config_file = [&ifs]() -> std::string {
         std::stringstream ss;
@@ -203,15 +209,12 @@ bool verify_config_file_checksum(boost::nowide::ifstream &ifs)
     std::string whole_config = read_whole_config_file();
 
     // The checksum should be on the last line in the config file.
-    if(size_t last_comment_pos = whole_config.find_last_of('#'); last_comment_pos != std::string::npos) {
+    if (size_t last_comment_pos = whole_config.find_last_of('#'); last_comment_pos != std::string::npos) {
         // Split read config into two parts, one with checksum, and the second part is part with configuration from the checksum was computed.
-        std::string config_part = whole_config.substr(0, last_comment_pos);
-        std::string config_part_hash = compute_md5_hash(config_part);
-
-        // Try to find the computed hash inside the part with checksum.
-        // When the checksum isn't found, that meant that the checksum is incorrect, the checksum was removed,
-        // or it is an older config file without the checksum.
-        if(whole_config.substr(last_comment_pos).find(config_part_hash) != std::string::npos)
+        // Verify existence and validity of the MD5 checksum line at the end of the file.
+        // When the checksum isn't found, the checksum was not saved correctly, it was removed or it is an older config file without the checksum.
+        // If the checksum is incorrect, then the file was either not saved correctly or modified.
+        if (std::string_view(whole_config.c_str() + last_comment_pos, whole_config.size() - last_comment_pos) == appconfig_md5_hash_line({ whole_config.data(), last_comment_pos }))
             return true;
     }
     return false;
@@ -223,63 +226,61 @@ std::string AppConfig::load()
     // 1) Read the complete config file into a boost::property_tree.
     namespace pt = boost::property_tree;
     pt::ptree tree;
-    boost::nowide::ifstream ifs(AppConfig::config_path());
-
-#ifdef WIN32
-    // Verify the checksum of the config file without taking just for debugging purpose.
-    if(!verify_config_file_checksum(ifs))
-        BOOST_LOG_TRIVIAL(info) << "The configuration file " << AppConfig::config_path() << " has the wrong checksum or checksum is missing.";
-
-    ifs.seekg(0, boost::nowide::ifstream::beg);
-#endif
+    boost::nowide::ifstream ifs;
 
     try {
+        ifs.open(AppConfig::config_path());
+#ifdef WIN32
+        // Verify the checksum of the config file without taking just for debugging purpose.
+        if (!verify_config_file_checksum(ifs))
+            BOOST_LOG_TRIVIAL(info) << "The configuration file " << AppConfig::config_path() <<
+            "has a wrong MD5 checksum or the checksum is missing. This may indicate a file corruption or a harmless user edit.";
+
+        ifs.seekg(0, boost::nowide::ifstream::beg);
+#endif
         pt::read_ini(ifs, tree);
     } catch (pt::ptree_error& ex) {
 #ifdef WIN32
         // The configuration file is corrupted, try replacing it with the backup configuration.
+        ifs.close();
         std::string backup_path = (boost::format("%1%.bak") % AppConfig::config_path()).str();
+        bool        recovered   = false;
         if (boost::filesystem::exists(backup_path)) {
             // Compute checksum of the configuration backup file and try to load configuration from it when the checksum is correct.
             boost::nowide::ifstream backup_ifs(backup_path);
-            if (!verify_config_file_checksum(backup_ifs))
-                return "The backup configuration is also corrupted. It isn't possible to restore the configuration from the backup.";
-
-            ifs.close();
-
-            std::string error_message;
-            if (copy_file(backup_path, AppConfig::config_path(), error_message, true) != SUCCESS)
-                return "Restoring of the backup configuration failed with the following error: " + error_message;
-
-            BOOST_LOG_TRIVIAL(info) << "The backup configuration " << backup_path << " was successfully restored.";
-            // Try parse configuration file after backup restoration.
-            ifs.open(AppConfig::config_path());
-            try {
-                pt::read_ini(ifs, tree);
-            } catch (pt::ptree_error &ex) {
-                return ex.what();
+            if (!verify_config_file_checksum(backup_ifs)) {
+                BOOST_LOG_TRIVIAL(error) << format("Both \"%1%\" and \"%2%\" are corrupted. It isn't possible to restore configuration from the backup.", AppConfig::config_path(), backup_path);
+                boost::filesystem::remove(backup_path);
+            } else if (std::string error_message; copy_file(backup_path, AppConfig::config_path(), error_message, false) != SUCCESS) {
+                BOOST_LOG_TRIVIAL(error) << format("Configuration file \"%1%\" is corrupted. Failed to restore from backup \"%2%\": %3%", AppConfig::config_path(), backup_path, error_message);
+                boost::filesystem::remove(backup_path);
+            } else {
+                BOOST_LOG_TRIVIAL(info) << format("Configuration file \"%1%\" was corrupted. It has been succesfully restored from the backup \"%2%\".", AppConfig::config_path(), backup_path);
+                // Try parse configuration file after restore from backup.
+                try {
+                    ifs.open(AppConfig::config_path());
+                    pt::read_ini(ifs, tree);
+                    recovered = true;
+                } catch (pt::ptree_error& ex) {
+                    BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\" after it has been restored from backup: %2%", AppConfig::config_path(), ex.what());
+                }
             }
-        } else {
-            std::string error_message = "The backup configuration " + backup_path +
-                                        " is missing. It isn't possible to restore the configuration "
-                                        "from the backup. Loading the configuration fails with the following error: " +
-                                        ex.what();
-            BOOST_LOG_TRIVIAL(error) << error_message;
-            return error_message;
+        } else
+#endif // WIN32
+            BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\": %2%", AppConfig::config_path(), ex.what());
+        if (! recovered) {
+            // Report the initial error of parsing PrusaSlicer.ini.
+            // Error while parsing config file. We'll customize the error message and rethrow to be displayed.
+            // ! But to avoid the use of _utf8 (related to use of wxWidgets) 
+            // we will rethrow this exception from the place of load() call, if returned value wouldn't be empty
+            /*
+            throw Slic3r::RuntimeError(
+                _utf8(L("Error parsing PrusaSlicer config file, it is probably corrupted. "
+                        "Try to manually delete the file to recover from the error. Your user profiles will not be affected.")) +
+                "\n\n" + AppConfig::config_path() + "\n\n" + ex.what());
+            */
+            return ex.what();
         }
-#endif
-        // Error while parsing config file. We'll customize the error message and rethrow to be displayed.
-        // ! But to avoid the use of _utf8 (related to use of wxWidgets) 
-        // we will rethrow this exception from the place of load() call, if returned value wouldn't be empty
-        /*
-        throw Slic3r::RuntimeError(
-        	_utf8(L("Error parsing PrusaSlicer config file, it is probably corrupted. "
-                    "Try to manually delete the file to recover from the error. Your user profiles will not be affected.")) + 
-        	"\n\n" + AppConfig::config_path() + "\n\n" + ex.what());
-        */
-#ifndef WIN32
-        return ex.what();
-#endif
     }
 
     // 2) Parse the property_tree, extract the sections and key / value pairs.
@@ -387,25 +388,33 @@ void AppConfig::save()
             config_ss << MODEL_PREFIX << model.first << " = " << escaped << std::endl;
         }
     }
+    // One empty line before the MD5 sum.
+    config_ss << std::endl;
 
     std::string config_str = config_ss.str();
     boost::nowide::ofstream c;
     c.open(path_pid, std::ios::out | std::ios::trunc);
     c << config_str;
 #ifdef WIN32
-    c << "# " << compute_md5_hash(config_str) << std::endl;
+    // WIN32 specific: The final "rename_file()" call is not safe in case of an application crash, there is no atomic "rename file" API
+    // provided by Windows (sic!). Therefore we save a MD5 checksum to be able to verify file corruption. In addition,
+    // we save the config file into a backup first before moving it to the final destination.
+    c << appconfig_md5_hash_line(config_str);
 #endif
     c.close();
     
 #ifdef WIN32
+    // Make a backup of the configuration file before copying it to the final destination.
     std::string error_message;
     std::string backup_path = (boost::format("%1%.bak") % path).str();
-
     // Copy configuration file with PID suffix into the configuration file with "bak" suffix.
-    if (copy_file(path_pid, backup_path, error_message, true) != SUCCESS)
+    if (copy_file(path_pid, backup_path, error_message, false) != SUCCESS)
         BOOST_LOG_TRIVIAL(error) << "Copying from " << path_pid << " to " << backup_path << " failed. Failed to create a backup configuration.";
 #endif
 
+    // Rename the config atomically.
+    // On Windows, the rename is likely NOT atomic, thus it may fail if PrusaSlicer crashes on another thread in the meanwhile.
+    // To cope with that, we already made a backup of the config on Windows.
     rename_file(path_pid, path);
     m_dirty = false;
 }
