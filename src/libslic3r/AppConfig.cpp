@@ -18,9 +18,9 @@
 #include <boost/property_tree/ptree_fwd.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/format/format_fwd.hpp>
+#include <boost/log/trivial.hpp>
 
 #ifdef WIN32
-#include <boost/log/trivial.hpp>
 //FIXME replace the two following includes with <boost/md5.hpp> after it becomes mainstream.
 #include <boost/uuid/detail/md5.hpp>
 #include <boost/algorithm/hex.hpp>
@@ -190,7 +190,7 @@ static std::string appconfig_md5_hash_line(const std::string_view data)
     md5_hash.process_bytes(data.data(), data.size());
     md5_hash.get_digest(md5_digest);
     boost::algorithm::hex(md5_digest, md5_digest + std::size(md5_digest), std::back_inserter(md5_digest_str));
-    // MD5 hash is 16 HEX digits long.
+    // MD5 hash is 32 HEX digits long.
     assert(md5_digest_str.size() == 32);
     // This line will be emited at the end of the file.
     return "# MD5 checksum " + md5_digest_str + "\n";
@@ -227,6 +227,7 @@ std::string AppConfig::load()
     namespace pt = boost::property_tree;
     pt::ptree tree;
     boost::nowide::ifstream ifs;
+    bool                    recovered = false;
 
     try {
         ifs.open(AppConfig::config_path());
@@ -234,7 +235,7 @@ std::string AppConfig::load()
         // Verify the checksum of the config file without taking just for debugging purpose.
         if (!verify_config_file_checksum(ifs))
             BOOST_LOG_TRIVIAL(info) << "The configuration file " << AppConfig::config_path() <<
-            "has a wrong MD5 checksum or the checksum is missing. This may indicate a file corruption or a harmless user edit.";
+            " has a wrong MD5 checksum or the checksum is missing. This may indicate a file corruption or a harmless user edit.";
 
         ifs.seekg(0, boost::nowide::ifstream::beg);
 #endif
@@ -244,15 +245,16 @@ std::string AppConfig::load()
         // The configuration file is corrupted, try replacing it with the backup configuration.
         ifs.close();
         std::string backup_path = (boost::format("%1%.bak") % AppConfig::config_path()).str();
-        bool        recovered   = false;
         if (boost::filesystem::exists(backup_path)) {
             // Compute checksum of the configuration backup file and try to load configuration from it when the checksum is correct.
             boost::nowide::ifstream backup_ifs(backup_path);
             if (!verify_config_file_checksum(backup_ifs)) {
                 BOOST_LOG_TRIVIAL(error) << format("Both \"%1%\" and \"%2%\" are corrupted. It isn't possible to restore configuration from the backup.", AppConfig::config_path(), backup_path);
+                backup_ifs.close();
                 boost::filesystem::remove(backup_path);
             } else if (std::string error_message; copy_file(backup_path, AppConfig::config_path(), error_message, false) != SUCCESS) {
                 BOOST_LOG_TRIVIAL(error) << format("Configuration file \"%1%\" is corrupted. Failed to restore from backup \"%2%\": %3%", AppConfig::config_path(), backup_path, error_message);
+                backup_ifs.close();
                 boost::filesystem::remove(backup_path);
             } else {
                 BOOST_LOG_TRIVIAL(info) << format("Configuration file \"%1%\" was corrupted. It has been succesfully restored from the backup \"%2%\".", AppConfig::config_path(), backup_path);
