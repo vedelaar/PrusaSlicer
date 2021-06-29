@@ -11,6 +11,7 @@ struct HintData
 {
 	std::string        text;
 	std::string        hypertext;
+	std::string		   follow_text;
 	std::function<void(void)> callback{ nullptr };
 };
 
@@ -32,7 +33,7 @@ public:
 	void operator=(HintDatabase const&) = delete;
 
 	// return true if HintData filled;
-	bool get_hint(HintData& data, bool up = true);
+	HintData* get_hint(bool up = true);
 private:
 	void	init();
 	void	load_hints_from_file(const boost::filesystem::path& path);
@@ -83,6 +84,7 @@ public:
 protected:
 	virtual void	set_next_window_size(ImGuiWrapper& imgui) override;
 	virtual void	count_spaces() override;
+	virtual void	count_lines() override;
 	virtual bool	on_text_click() override;
 	virtual void	render_text(ImGuiWrapper& imgui,
 								const float win_size_x, const float win_size_y,

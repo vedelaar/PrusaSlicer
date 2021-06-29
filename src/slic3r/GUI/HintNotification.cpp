@@ -55,29 +55,34 @@ void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
 			//unescape text
 			std::string text;
 			unescape_string_cstyle(dict["text"], text);
+			// follow_text is regular text following the hypertext, could be empty
+			std::string follow_text;
+			if (dict.find("follow_text") != dict.end())
+				unescape_string_cstyle(dict["follow_text"], follow_text);
+
 			// create HintData
 			if (dict.find("hypertext_type") != dict.end()) {
 				//link to internet
 				if(dict["hypertext_type"] == "link") {
 					std::string	hypertext_link = dict["hypertext_link"];
-					HintData	hint_data{ text, dict["hypertext"], [hypertext_link]() { wxLaunchDefaultBrowser(hypertext_link); }  };
+					HintData	hint_data{ text, dict["hypertext"], follow_text, [hypertext_link]() { wxLaunchDefaultBrowser(hypertext_link); }  };
 					m_loaded_hints.emplace_back(hint_data);
 				// highlight settings
 				} else if (dict["hypertext_type"] == "settings") {
 					std::string		opt = dict["hypertext_settings_opt"];
 					Preset::Type	type = static_cast<Preset::Type>(std::atoi(dict["hypertext_settings_type"].c_str()));
 					std::wstring	category = boost::nowide::widen(dict["hypertext_settings_category"]);
-					HintData		hint_data{ text, dict["hypertext"], [opt, type, category]() { GUI::wxGetApp().sidebar().jump_to_option(opt, type, category); } };
+					HintData		hint_data{ text, dict["hypertext"], follow_text, [opt, type, category]() { GUI::wxGetApp().sidebar().jump_to_option(opt, type, category); } };
 					m_loaded_hints.emplace_back(hint_data);
 				// open preferences
 				} else if(dict["hypertext_type"] == "preferences") {
 					int			page = static_cast<Preset::Type>(std::atoi(dict["hypertext_preferences_page"].c_str()));
-					HintData	hint_data{ text, dict["hypertext"], [page]() { wxGetApp().open_preferences(page); } };
+					HintData	hint_data{ text, dict["hypertext"], follow_text, [page]() { wxGetApp().open_preferences(page); } };
 					m_loaded_hints.emplace_back(hint_data);
 
 				} else if (dict["hypertext_type"] == "plater") {
 					std::string	item = dict["hypertext_plater_item"];
-					HintData	hint_data{ text, dict["hypertext"], [item]() { GUI::wxGetApp().plater()->canvas3D()->highlight_toolbar_item(item); } };
+					HintData	hint_data{ text, dict["hypertext"], follow_text, [item]() { GUI::wxGetApp().plater()->canvas3D()->highlight_toolbar_item(item); } };
 					
 					m_loaded_hints.emplace_back(hint_data);
 				}
@@ -89,7 +94,7 @@ void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
 		}
 	}
 }
-bool HintDatabase::get_hint(HintData& data, bool up)
+HintData* HintDatabase::get_hint(bool up)
 {
     if (! m_initialized) {
         init();
@@ -102,11 +107,14 @@ bool HintDatabase::get_hint(HintData& data, bool up)
 	AppConfig* app_config = wxGetApp().app_config;
 	app_config->set("last_hint", std::to_string(m_hint_id));
 
+	//data = &m_loaded_hints[m_hint_id];
+	/*
     data.text = m_loaded_hints[m_hint_id].text;
     data.hypertext = m_loaded_hints[m_hint_id].hypertext;
+	data.follow_text = m_loaded_hints[m_hint_id].follow_text;
     data.callback = m_loaded_hints[m_hint_id].callback;
-
-    return true;
+	*/
+    return &m_loaded_hints[m_hint_id];
 }
 
 void NotificationManager::HintNotification::count_spaces()
@@ -125,6 +133,131 @@ void NotificationManager::HintNotification::count_spaces()
 
 	m_window_width_offset = m_left_indentation + m_line_height * 3.f;// 5.5f; // no right arrow
 	m_window_width = m_line_height * 25;
+}
+
+void NotificationManager::HintNotification::count_lines()
+{
+	std::string text = m_text1;
+	size_t      last_end = 0;
+	m_lines_count = 0;
+
+	if (text.empty())
+		return;
+
+	m_endlines.clear();
+	while (last_end < text.length() - 1)
+	{
+		size_t next_hard_end = text.find_first_of('\n', last_end);
+		if (next_hard_end != std::string::npos && ImGui::CalcTextSize(text.substr(last_end, next_hard_end - last_end).c_str()).x < m_window_width - m_window_width_offset) {
+			//next line is ended by '/n'
+			m_endlines.push_back(next_hard_end);
+			last_end = next_hard_end + 1;
+		}
+		else {
+			// find next suitable endline
+			if (ImGui::CalcTextSize(text.substr(last_end).c_str()).x >= m_window_width - m_window_width_offset) {
+				// more than one line till end
+				size_t next_space = text.find_first_of(' ', last_end);
+				if (next_space > 0) {
+					size_t next_space_candidate = text.find_first_of(' ', next_space + 1);
+					while (next_space_candidate > 0 && ImGui::CalcTextSize(text.substr(last_end, next_space_candidate - last_end).c_str()).x < m_window_width - m_window_width_offset) {
+						next_space = next_space_candidate;
+						next_space_candidate = text.find_first_of(' ', next_space + 1);
+					}
+					// when one word longer than line.
+					if (ImGui::CalcTextSize(text.substr(last_end, next_space - last_end).c_str()).x > m_window_width - m_window_width_offset) {
+						float width_of_a = ImGui::CalcTextSize("a").x;
+						int letter_count = (int)((m_window_width - m_window_width_offset) / width_of_a);
+						while (last_end + letter_count < text.size() && ImGui::CalcTextSize(text.substr(last_end, letter_count).c_str()).x < m_window_width - m_window_width_offset) {
+							letter_count++;
+						}
+						m_endlines.push_back(last_end + letter_count);
+						last_end += letter_count;
+					}
+					else {
+						m_endlines.push_back(next_space);
+						last_end = next_space + 1;
+					}
+				}
+			}
+			else {
+				m_endlines.push_back(text.length());
+				last_end = text.length();
+			}
+
+		}
+		m_lines_count++;
+	}
+	int prev_end = m_endlines.size() > 1 ? m_endlines[m_endlines.size() - 2] : 0;
+	int size_of_last_line = ImGui::CalcTextSize(text.substr(prev_end, last_end - prev_end).c_str()).x;
+	// hypertext calculation
+	if (!m_hypertext.empty()) {
+		if (size_of_last_line + ImGui::CalcTextSize(m_hypertext.c_str()).x > m_window_width - m_window_width_offset) {
+			// hypertext on new line
+			size_of_last_line = ImGui::CalcTextSize((m_hypertext + "  ").c_str()).x;
+			m_endlines.push_back(last_end);
+			m_lines_count++;
+		} else {
+			size_of_last_line += ImGui::CalcTextSize((m_hypertext + "  ").c_str()).x;
+		}
+	}
+	if (!m_text2.empty()) {
+		text						= m_text2;
+		last_end					= 0;
+		m_endlines2.clear();
+		// if size_of_last_line too large to fit anything
+		size_t first_end = std::min(text.find_first_of('\n'), text.find_first_of(' '));
+		if (size_of_last_line >= m_window_width - m_window_width_offset - ImGui::CalcTextSize(text.substr(0, first_end).c_str()).x) {
+			m_endlines2.push_back(0);
+			size_of_last_line = 0;
+		}
+		while (last_end < text.length() - 1)
+		{
+			size_t next_hard_end = text.find_first_of('\n', last_end);
+			if (next_hard_end != std::string::npos && ImGui::CalcTextSize(text.substr(last_end, next_hard_end - last_end).c_str()).x < m_window_width - m_window_width_offset - size_of_last_line) {
+				//next line is ended by '/n'
+				m_endlines2.push_back(next_hard_end);
+				last_end = next_hard_end + 1;
+			}
+			else {
+				// find next suitable endline
+				if (ImGui::CalcTextSize(text.substr(last_end).c_str()).x >= m_window_width - m_window_width_offset - size_of_last_line) {
+					// more than one line till end
+					size_t next_space = text.find_first_of(' ', last_end);
+					if (next_space > 0) {
+						size_t next_space_candidate = text.find_first_of(' ', next_space + 1);
+						while (next_space_candidate > 0 && ImGui::CalcTextSize(text.substr(last_end, next_space_candidate - last_end).c_str()).x < m_window_width - m_window_width_offset - size_of_last_line) {
+							next_space = next_space_candidate;
+							next_space_candidate = text.find_first_of(' ', next_space + 1);
+						}
+						// when one word longer than line.
+						if (ImGui::CalcTextSize(text.substr(last_end, next_space - last_end).c_str()).x > m_window_width - m_window_width_offset) {
+							float width_of_a = ImGui::CalcTextSize("a").x;
+							int letter_count = (int)((m_window_width - m_window_width_offset) / width_of_a);
+							while (last_end + letter_count < text.size() && ImGui::CalcTextSize(text.substr(last_end, letter_count).c_str()).x < m_window_width - m_window_width_offset - size_of_last_line) {
+								letter_count++;
+							}
+							m_endlines2.push_back(last_end + letter_count);
+							last_end += letter_count;
+						}
+						else {
+							m_endlines2.push_back(next_space);
+							last_end = next_space + 1;
+						}
+					}
+				}
+				else {
+					m_endlines2.push_back(text.length());
+					last_end = text.length();
+				}
+
+			}
+			if (size_of_last_line == 0) // if first line is continuation of previous text, do not add to line count.
+				m_lines_count++;
+			size_of_last_line = 0; // should countain value only for first line (with hypertext) 
+			
+		}
+	}
 }
 
 void NotificationManager::HintNotification::init()
@@ -185,12 +318,12 @@ void NotificationManager::HintNotification::render_text(ImGuiWrapper& imgui, con
 	float	shift_y = m_line_height;
 	std::string line;
 
-	for (size_t i = 0; i < (m_multiline ? m_lines_count : 2); i++) {
+	for (size_t i = 0; i < (m_multiline ? /*m_lines_count*/m_endlines.size() : 2); i++) {
 		line.clear();
 		ImGui::SetCursorPosX(x_offset);
 		ImGui::SetCursorPosY(starting_y + i * shift_y);
 		if (m_endlines.size() > i && m_text1.size() >= m_endlines[i]) {
-			if (i == 1 && m_lines_count > 2 && !m_multiline) {
+			if (i == 1 && m_endlines.size() > 2 && !m_multiline) {
 				// second line with "more" hypertext
 				line = m_text1.substr(m_endlines[0] + (m_text1[m_endlines[0]] == '\n' || m_text1[m_endlines[0]] == ' ' ? 1 : 0), m_endlines[1] - m_endlines[0] - (m_text1[m_endlines[0]] == '\n' || m_text1[m_endlines[0]] == ' ' ? 1 : 0));
 				while (ImGui::CalcTextSize(line.c_str()).x > m_window_width - m_window_width_offset - ImGui::CalcTextSize((".." + _u8L("More")).c_str()).x) {
@@ -212,8 +345,35 @@ void NotificationManager::HintNotification::render_text(ImGuiWrapper& imgui, con
 	if (!m_multiline && m_lines_count > 2) {
 		render_hypertext(imgui, x_offset + ImGui::CalcTextSize((line + " ").c_str()).x, starting_y + shift_y, _u8L("More"), true);
 	} else if (!m_hypertext.empty()) {
-		render_hypertext(imgui, x_offset + ImGui::CalcTextSize((line + " ").c_str()).x, starting_y + (m_lines_count - 1) * shift_y, m_hypertext);
+		render_hypertext(imgui, x_offset + ImGui::CalcTextSize((line + (line.empty()? "": " ")).c_str()).x, starting_y + (m_endlines.size() - 1) * shift_y, m_hypertext);
 	}
+
+	// text2
+	if (!m_text2.empty() && m_multiline) {
+		starting_y += (m_endlines.size() - 1) * shift_y;
+		last_end = 0;
+		for (size_t i = 0; i < (m_multiline ? m_endlines2.size() : 2); i++) {
+			if (i == 0) //first line X is shifted by hypertext
+				ImGui::SetCursorPosX(x_offset + ImGui::CalcTextSize((line + m_hypertext + (line.empty() ? " " : "  ")).c_str()).x);
+			else
+				ImGui::SetCursorPosX(x_offset);
+
+			ImGui::SetCursorPosY(starting_y + i * shift_y);
+			line.clear();
+			if (m_endlines2.size() > i && m_text2.size() >= m_endlines2[i]) {
+
+				// regural line
+				line = m_text2.substr(last_end, m_endlines2[i] - last_end);
+
+				last_end = m_endlines2[i];
+				if (m_text2.size() > m_endlines2[i])
+					last_end += (m_text2[m_endlines2[i]] == '\n' || m_text2[m_endlines2[i]] == ' ' ? 1 : 0);
+				imgui.text(line.c_str());
+			}
+
+		}
+	}
+	
 
 	// Do not show again checkbox
 	/*
@@ -414,12 +574,17 @@ void NotificationManager::HintNotification::render_left_arrow_button(ImGuiWrappe
 }
 void NotificationManager::HintNotification::retrieve_data(bool up)
 {
-    HintData hint_data;
-    if(HintDatabase::get_instance().get_hint(hint_data, up))
+    HintData* hint_data = HintDatabase::get_instance().get_hint(up);
+    if(hint_data != nullptr)
     {
-        NotificationData nd { NotificationType::DidYouKnowHint, NotificationLevel::RegularNotification, 0, /*_u8L("DID YOU KNOW:\n") +*/ hint_data.text, hint_data.hypertext };
+        NotificationData nd { NotificationType::DidYouKnowHint,
+						      NotificationLevel::RegularNotification,
+							  0,
+						      /*_u8L("DID YOU KNOW:\n") +*/ hint_data->text,
+							  hint_data->hypertext, nullptr,
+							  hint_data->follow_text };
         update(nd);
-		m_hypertext_callback = hint_data.callback;
+		m_hypertext_callback = hint_data->callback;
         m_has_hint_data = true;
 		//m_multiline = false;
     }

@@ -321,7 +321,10 @@ private:
 		float            m_top_y                { 0.0f };  
 		// Height of text - Used as basic scaling unit!
 		float            m_line_height;
+		// endlines for text1, hypertext excluded
         std::vector<size_t> m_endlines;
+		// endlines for text2
+		std::vector<size_t> m_endlines2;
 		// Gray are f.e. eorrors when its uknown if they are still valid
 		bool             m_is_gray              { false };
 		//if multiline = true, notification is showing all lines(>2)
