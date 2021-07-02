@@ -5,6 +5,7 @@
 #include "ImGuiWrapper.hpp"
 #include "PrintHostDialogs.hpp"
 #include "wxExtensions.hpp"
+#include "libslic3r/Config.hpp"
 #include "../Utils/PrintHost.hpp"
 #include "libslic3r/Config.hpp"
 
