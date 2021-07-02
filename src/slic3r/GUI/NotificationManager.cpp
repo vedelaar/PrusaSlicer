@@ -30,7 +30,36 @@ wxDEFINE_EVENT(EVT_EJECT_DRIVE_NOTIFICAION_CLICKED, EjectDriveNotificationClicke
 wxDEFINE_EVENT(EVT_EXPORT_GCODE_NOTIFICAION_CLICKED, ExportGcodeNotificationClickedEvent);
 wxDEFINE_EVENT(EVT_PRESET_UPDATE_AVAILABLE_CLICKED, PresetUpdateAvailableClickedEvent);
 
-namespace Notifications_Internal{
+const NotificationManager::NotificationData NotificationManager::basic_notifications[] = {
+	{NotificationType::Mouse3dDisconnected, NotificationLevel::RegularNotification, 10,  _u8L("3D Mouse disconnected.") },
+	{NotificationType::PresetUpdateAvailable, NotificationLevel::ImportantNotification, 20,  _u8L("Configuration update is available."),  _u8L("See more."),
+		[](wxEvtHandler* evnthndlr) {
+			if (evnthndlr != nullptr)
+				wxPostEvent(evnthndlr, PresetUpdateAvailableClickedEvent(EVT_PRESET_UPDATE_AVAILABLE_CLICKED));
+			return true;
+		}
+	},
+	{NotificationType::NewAppAvailable, NotificationLevel::ImportantNotification, 20,  _u8L("New version is available."),  _u8L("See Releases page."), [](wxEvtHandler* evnthndlr) {
+		wxLaunchDefaultBrowser("https://github.com/prusa3d/PrusaSlicer/releases"); return true; }},
+	{NotificationType::EmptyColorChangeCode, NotificationLevel::RegularNotification, 10,
+		_u8L("You have just added a G-code for color change, but its value is empty.\n"
+			 "To export the G-code correctly, check the \"Color Change G-code\" in \"Printer Settings > Custom G-code\"") },
+	{NotificationType::EmptyAutoColorChange, NotificationLevel::RegularNotification, 10,
+		_u8L("This model doesn't allow to automatically add the color changes") },
+	{NotificationType::DesktopIntegrationSuccess, NotificationLevel::RegularNotification, 10,
+		_u8L("Desktop integration was successful.") },
+	{NotificationType::DesktopIntegrationFail, NotificationLevel::WarningNotification, 10,
+		_u8L("Desktop integration failed.") },
+	{NotificationType::UndoDesktopIntegrationSuccess, NotificationLevel::RegularNotification, 10,
+		_u8L("Undo desktop integration was successful.") },
+	{NotificationType::UndoDesktopIntegrationFail, NotificationLevel::WarningNotification, 10,
+		_u8L("Undo desktop integration failed.") },
+	//{NotificationType::NewAppAvailable, NotificationLevel::ImportantNotification, 20,  _u8L("New vesion of PrusaSlicer is available.",  _u8L("Download page.") },
+	//{NotificationType::LoadingFailed, NotificationLevel::RegularNotification, 20,  _u8L("Loading of model has Failed") },
+	//{NotificationType::DeviceEjected, NotificationLevel::RegularNotification, 10,  _u8L("Removable device has been safely ejected")} // if we want changeble text (like here name of device), we need to do it as CustomNotification
+};
+
+namespace {
 	ImFont* add_default_font(float pixel_size)
 	{
 		ImGuiIO& io = ImGui::GetIO();
@@ -42,7 +71,7 @@ namespace Notifications_Internal{
 		return font;
 	}
 
-	static inline void push_style_color(ImGuiCol idx, const ImVec4& col, bool fading_out, float current_fade_opacity)
+	inline void push_style_color(ImGuiCol idx, const ImVec4& col, bool fading_out, float current_fade_opacity)
 	{
 		if (fading_out)
 			ImGui::PushStyleColor(idx, ImVec4(col.x, col.y, col.z, col.w * current_fade_opacity));
@@ -129,8 +158,8 @@ NotificationManager::PopNotification::PopNotification(const NotificationData &n,
 	  m_data                (n)
 	, m_id_provider   		(id_provider)
 	, m_text1               (n.text1)
-    , m_hypertext           (n.hypertext)
-    , m_text2               (n.text2)
+	, m_hypertext           (n.hypertext)
+	, m_text2               (n.text2)
 	, m_evt_handler         (evt_handler)
 	, m_notification_start  (GLCanvas3D::timestamp_now())
 {}
@@ -184,8 +213,8 @@ void NotificationManager::PopNotification::render(GLCanvas3D& canvas, float init
 	
 	// color change based on fading out
 	if (m_state == EState::FadingOut) {
-		Notifications_Internal::push_style_color(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg), true, m_current_fade_opacity);
-		Notifications_Internal::push_style_color(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_Text), true, m_current_fade_opacity);
+		push_style_color(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg), true, m_current_fade_opacity);
+		push_style_color(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_Text), true, m_current_fade_opacity);
 		fading_pop = true;
 	}
 	
@@ -219,20 +248,20 @@ bool NotificationManager::PopNotification::push_background_color()
 {
 	if (m_is_gray) {
 		ImVec4 backcolor(0.7f, 0.7f, 0.7f, 0.5f);
-		Notifications_Internal::push_style_color(ImGuiCol_WindowBg, backcolor, m_state == EState::FadingOut, m_current_fade_opacity);
+		push_style_color(ImGuiCol_WindowBg, backcolor, m_state == EState::FadingOut, m_current_fade_opacity);
 		return true;
 	}
 	if (m_data.level == NotificationLevel::ErrorNotification) {
 		ImVec4 backcolor = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
 		backcolor.x += 0.3f;
-		Notifications_Internal::push_style_color(ImGuiCol_WindowBg, backcolor, m_state == EState::FadingOut, m_current_fade_opacity);
+		push_style_color(ImGuiCol_WindowBg, backcolor, m_state == EState::FadingOut, m_current_fade_opacity);
 		return true;
 	}
 	if (m_data.level == NotificationLevel::WarningNotification) {
 		ImVec4 backcolor = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
 		backcolor.x += 0.3f;
 		backcolor.y += 0.15f;
-		Notifications_Internal::push_style_color(ImGuiCol_WindowBg, backcolor, m_state == EState::FadingOut, m_current_fade_opacity);
+		push_style_color(ImGuiCol_WindowBg, backcolor, m_state == EState::FadingOut, m_current_fade_opacity);
 		return true;
 	}
 	return false;
@@ -473,7 +502,7 @@ void NotificationManager::PopNotification::render_hypertext(ImGuiWrapper& imgui,
 		orange_color.y += 0.2f;
 
 	//text
-	Notifications_Internal::push_style_color(ImGuiCol_Text, orange_color, m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_Text, orange_color, m_state == EState::FadingOut, m_current_fade_opacity);
 	ImGui::SetCursorPosX(text_x);
 	ImGui::SetCursorPosY(text_y);
 	imgui.text(text.c_str());
@@ -494,8 +523,8 @@ void NotificationManager::PopNotification::render_close_button(ImGuiWrapper& img
 	ImVec2 win_pos(win_pos_x, win_pos_y); 
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.0f, .0f, .0f, .0f));
-	Notifications_Internal::push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
-	Notifications_Internal::push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
 	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.0f, .0f, .0f, .0f));
 
 
@@ -545,9 +574,9 @@ void NotificationManager::PopNotification::render_minimize_button(ImGuiWrapper& 
 {
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.0f, .0f, .0f, .0f));
-	Notifications_Internal::push_style_color(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg), m_state == EState::FadingOut, m_current_fade_opacity);
-	Notifications_Internal::push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
-	Notifications_Internal::push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
 
 	
 	//button - if part if treggered
@@ -765,8 +794,8 @@ void NotificationManager::ExportFinishedNotification::render_eject_button(ImGuiW
 	ImVec2 win_pos(win_pos_x, win_pos_y);
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.0f, .0f, .0f, .0f));
-	Notifications_Internal::push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
-	Notifications_Internal::push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
 	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.0f, .0f, .0f, .0f));
 
 	std::string button_text;
@@ -821,7 +850,7 @@ void NotificationManager::ExportFinishedNotification::render_eject_button(ImGuiW
 }
 bool NotificationManager::ExportFinishedNotification::on_text_click()
 {
-	Notifications_Internal::open_folder(m_export_dir_path);
+	open_folder(m_export_dir_path);
 	return false;
 }
 //------ProgressBar----------------
@@ -964,7 +993,7 @@ bool NotificationManager::PrintHostUploadNotification::push_background_color()
 	if (m_uj_state == UploadJobState::PB_ERROR) {
 		ImVec4 backcolor = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
 		backcolor.x += 0.3f;
-		Notifications_Internal::push_style_color(ImGuiCol_WindowBg, backcolor, m_state == EState::FadingOut, m_current_fade_opacity);
+		push_style_color(ImGuiCol_WindowBg, backcolor, m_state == EState::FadingOut, m_current_fade_opacity);
 		return true;
 	}
 	return false;
@@ -1034,8 +1063,8 @@ void NotificationManager::PrintHostUploadNotification::render_cancel_button(ImGu
 	ImVec2 win_pos(win_pos_x, win_pos_y);
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.0f, .0f, .0f, .0f));
-	Notifications_Internal::push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
-	Notifications_Internal::push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
 	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.0f, .0f, .0f, .0f));
 
 	std::string button_text;
@@ -1091,10 +1120,10 @@ NotificationManager::NotificationManager(wxEvtHandler* evt_handler) :
 }
 void NotificationManager::push_notification(const NotificationType type, int timestamp)
 {
-	auto it = std::find_if(basic_notifications.begin(), basic_notifications.end(),
+	auto it = std::find_if(std::begin(basic_notifications), std::end(basic_notifications),
 		boost::bind(&NotificationData::type, boost::placeholders::_1) == type);
-	assert(it != basic_notifications.end());
-	if (it != basic_notifications.end())
+	assert(it != std::end(basic_notifications));
+	if (it != std::end(basic_notifications))
 		push_notification_data(*it, timestamp);
 }
 void NotificationManager::push_notification(const std::string& text, int timestamp)
