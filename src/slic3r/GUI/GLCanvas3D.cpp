@@ -6499,7 +6499,7 @@ void GLCanvas3D::highlight_toolbar_item(const std::string& item_name)
 {
     GLToolbarItem* item = m_main_toolbar.get_item(item_name);
     if (!item)
-        m_undoredo_toolbar.get_item(item_name);
+        item = m_undoredo_toolbar.get_item(item_name);
     if (!item)
         return;
     m_toolbar_highlighter.init(item, this);
