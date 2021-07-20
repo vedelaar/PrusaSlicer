@@ -94,6 +94,7 @@ private:
     mutable GLTexture m_icons_texture;
     mutable bool m_icons_texture_dirty;
     BackgroundTexture m_background_texture;
+    BackgroundTexture m_arrow_texture;
     Layout m_layout;
     EType m_current;
     EType m_hover;
@@ -127,6 +128,8 @@ public:
     explicit GLGizmosManager(GLCanvas3D& parent);
 
     bool init();
+
+    bool init_arrow(const BackgroundTexture::Metadata& arrow_texture);
 
     template<class Archive>
     void load(Archive& ar)
@@ -221,6 +224,8 @@ public:
 
     void render_overlay() const;
 
+    void render_arrow(const GLCanvas3D& parent, GLGizmoBase* highlighted_item) const;
+
     std::string get_tooltip() const;
 
     bool on_mouse(wxMouseEvent& evt);
@@ -235,6 +240,7 @@ public:
 
 private:
     void render_background(float left, float top, float right, float bottom, float border) const;
+    
     void do_render_overlay() const;
 
     float get_scaled_total_height() const;

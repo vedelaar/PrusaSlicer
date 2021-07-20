@@ -127,6 +127,23 @@ bool GLGizmosManager::init()
     return true;
 }
 
+bool GLGizmosManager::init_arrow(const BackgroundTexture::Metadata& arrow_texture)
+{
+    if (m_arrow_texture.texture.get_id() != 0)
+        return true;
+
+    std::string path = resources_dir() + "/icons/";
+    bool res = false;
+
+    if (!arrow_texture.filename.empty())
+        res = m_arrow_texture.texture.load_from_file(path + arrow_texture.filename, false, GLTexture::SingleThreaded, false);
+
+    if (res)
+        m_arrow_texture.metadata = arrow_texture;
+
+    return res;
+}
+
 void GLGizmosManager::set_overlay_icon_size(float size)
 {
     if (m_layout.icons_size != size)
@@ -971,6 +988,80 @@ void GLGizmosManager::render_background(float left, float top, float right, floa
         // bottom-right corner
         GLTexture::render_sub_texture(tex_id, internal_right, right, bottom, internal_bottom, { { internal_right_uv, bottom_uv }, { right_uv, bottom_uv }, { right_uv, internal_bottom_uv }, { internal_right_uv, internal_bottom_uv } });
     }
+}
+
+void GLGizmosManager::render_arrow(const GLCanvas3D& parent, GLGizmoBase* highlighted_item) const
+{
+    
+    std::vector<size_t> selectable_idxs = get_selectable_idxs();
+    if (selectable_idxs.empty())
+        return;
+
+    float cnv_w = (float)m_parent.get_canvas_size().get_width();
+    float cnv_h = (float)m_parent.get_canvas_size().get_height();
+    float zoom = (float)wxGetApp().plater()->get_camera().get_zoom();
+    float inv_zoom = (float)wxGetApp().plater()->get_camera().get_inv_zoom();
+
+    float height = get_scaled_total_height();
+    float width = get_scaled_total_width();
+    float zoomed_border = m_layout.scaled_border() * inv_zoom;
+
+    float zoomed_top_x = (-0.5f * cnv_w) * inv_zoom;
+    float zoomed_top_y = (0.5f * height) * inv_zoom;
+
+    float zoomed_left = zoomed_top_x;
+    float zoomed_top = zoomed_top_y;
+    float zoomed_right = zoomed_left + width * inv_zoom;
+    float zoomed_bottom = zoomed_top - height * inv_zoom;
+    
+
+    zoomed_top_x += zoomed_border;
+    zoomed_top_y -= zoomed_border;
+
+    float icons_size = m_layout.scaled_icons_size();
+    float zoomed_icons_size = icons_size * inv_zoom;
+    float zoomed_stride_y = m_layout.scaled_stride_y() * inv_zoom;
+    
+    //unsigned int icons_texture_id = m_icons_texture.get_id();
+    
+    int tex_width = m_icons_texture.get_width();
+    int tex_height = m_icons_texture.get_height();
+    /*
+    if ((icons_texture_id == 0) || (tex_width <= 1) || (tex_height <= 1))
+        return;
+
+    float du = (float)(tex_width - 1) / (6.0f * (float)tex_width); // 6 is the number of possible states if the icons
+    float dv = (float)(tex_height - 1) / (float)(m_gizmos.size() * tex_height);
+
+    // tiles in the texture are spaced by 1 pixel
+    float u_offset = 1.0f / (float)tex_width;
+    float v_offset = 1.0f / (float)tex_height;
+    */
+
+    for (size_t idx : selectable_idxs)
+    {
+        GLGizmoBase* gizmo = m_gizmos[idx].get();
+
+        if (gizmo == highlighted_item)
+        {      
+            unsigned int tex_id = m_arrow_texture.texture.get_id();
+
+            float inv_tex_width = (tex_width != 0.0f) ? 1.0f / tex_width : 0.0f;
+            float inv_tex_height = (tex_height != 0.0f) ? 1.0f / tex_height : 0.0f;
+
+            float internal_left_uv = (float)m_arrow_texture.metadata.left * inv_tex_width;
+            float internal_right_uv = 1.0f - (float)m_arrow_texture.metadata.right * inv_tex_width;
+            float internal_top_uv = 1.0f - (float)m_arrow_texture.metadata.top * inv_tex_height;
+            float internal_bottom_uv = (float)m_arrow_texture.metadata.bottom * inv_tex_height;
+
+            GLTexture::render_sub_texture(tex_id, zoomed_top_x + zoomed_icons_size * 1.2f, zoomed_top_x + zoomed_icons_size * 2.2f, zoomed_top_y - zoomed_icons_size, zoomed_top_y, { { internal_left_uv, internal_top_uv }, { internal_left_uv, internal_bottom_uv }, { internal_right_uv, internal_bottom_uv }, { internal_right_uv, internal_top_uv } });
+
+            break;
+        }
+
+        zoomed_top_y -= zoomed_stride_y;
+    }
+
 }
 
 void GLGizmosManager::do_render_overlay() const
