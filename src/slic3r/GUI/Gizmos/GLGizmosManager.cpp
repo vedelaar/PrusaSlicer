@@ -1012,7 +1012,7 @@ void GLGizmosManager::do_render_overlay() const
     if ((icons_texture_id == 0) || (tex_width <= 1) || (tex_height <= 1))
         return;
 
-    float du = (float)(tex_width - 1) / (4.0f * (float)tex_width); // 4 is the number of possible states if the icons
+    float du = (float)(tex_width - 1) / (6.0f * (float)tex_width); // 6 is the number of possible states if the icons
     float dv = (float)(tex_height - 1) / (float)(m_gizmos.size() * tex_height);
 
     // tiles in the texture are spaced by 1 pixel
@@ -1024,7 +1024,8 @@ void GLGizmosManager::do_render_overlay() const
         GLGizmoBase* gizmo = m_gizmos[idx].get();
 
         unsigned int sprite_id = gizmo->get_sprite_id();
-        int icon_idx = (m_current == idx) ? 2 : ((m_hover == idx) ? 1 : (gizmo->is_activable()? 0 : 3));
+        
+        int icon_idx = (gizmo->get_highlighted() ? (gizmo->get_highlighted_shown() ? 4 : 5) : (m_current == idx) ? 2 : ((m_hover == idx) ? 1 : (gizmo->is_activable()? 0 : 3)));
 
         float v_top = v_offset + sprite_id * dv;
         float u_left = u_offset + icon_idx * du;
@@ -1055,13 +1056,26 @@ GLGizmoBase* GLGizmosManager::get_current() const
     return ((m_current == Undefined) || m_gizmos.empty()) ? nullptr : m_gizmos[m_current].get();
 }
 
+GLGizmoBase* GLGizmosManager::get_gizmo_from_name(const std::string& gizmo_name) const
+{
+    for (auto &gizmo : m_gizmos)
+    {
+        std::string filename = gizmo->get_icon_filename();
+        filename = filename.substr(0, filename.find_first_of('.'));
+        if (filename == gizmo_name)
+            return gizmo.get();
+    }
+    return nullptr;
+}
+
+
 bool GLGizmosManager::generate_icons_texture() const
 {
     std::string path = resources_dir() + "/icons/";
     std::vector<std::string> filenames;
     for (size_t idx=0; idx<m_gizmos.size(); ++idx)
     {
-        if (m_gizmos[idx] != nullptr)
+        if (m_gizmos[idx] != nullptr)   
         {
             const std::string& icon_filename = m_gizmos[idx]->get_icon_filename();
             if (!icon_filename.empty())
@@ -1074,6 +1088,8 @@ bool GLGizmosManager::generate_icons_texture() const
     states.push_back(std::make_pair(0, false)); // Hovered
     states.push_back(std::make_pair(0, true));  // Selected
     states.push_back(std::make_pair(2, false)); // Disabled
+    states.push_back(std::make_pair(0, false)); // HighlightedShown
+    states.push_back(std::make_pair(2, false)); // HighlightedHidden
 
     unsigned int sprite_size_px = (unsigned int)m_layout.scaled_icons_size();
 //    // force even size

@@ -182,6 +182,7 @@ public:
 
     EType get_current_type() const { return m_current; }
     GLGizmoBase* get_current() const;
+    GLGizmoBase* get_gizmo_from_name(const std::string& gizmo_name) const;
 
     bool is_running() const;
     bool handle_shortcut(int key);

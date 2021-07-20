@@ -83,7 +83,10 @@ void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
 				} else if (dict["hypertext_type"] == "plater") {
 					std::string	item = dict["hypertext_plater_item"];
 					HintData	hint_data{ text, dict["hypertext"], follow_text, [item]() { GUI::wxGetApp().plater()->canvas3D()->highlight_toolbar_item(item); } };
-					
+					m_loaded_hints.emplace_back(hint_data);
+				} else if (dict["hypertext_type"] == "gizmo") {
+					std::string	item = dict["hypertext_gizmo_item"];
+					HintData	hint_data{ text, dict["hypertext"], follow_text, [item]() { GUI::wxGetApp().plater()->canvas3D()->highlight_gizmo(item); } };
 					m_loaded_hints.emplace_back(hint_data);
 				}
 			} else {

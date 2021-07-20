@@ -900,7 +900,8 @@ wxDEFINE_EVENT(EVT_GLCANVAS_ADAPTIVE_LAYER_HEIGHT_PROFILE, Event<float>);
 wxDEFINE_EVENT(EVT_GLCANVAS_SMOOTH_LAYER_HEIGHT_PROFILE, HeightProfileSmoothEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_RELOAD_FROM_DISK, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_RENDER_TIMER, wxTimerEvent/*RenderTimerEvent*/);
-wxDEFINE_EVENT(EVT_GLCANVAS_HIGHLIGHTER_TIMER, wxTimerEvent);
+wxDEFINE_EVENT(EVT_GLCANVAS_TOOLBAR_HIGHLIGHTER_TIMER, wxTimerEvent);
+wxDEFINE_EVENT(EVT_GLCANVAS_GIZMO_HIGHLIGHTER_TIMER, wxTimerEvent);
 
 const double GLCanvas3D::DefaultCameraZoomToBoxMarginFactor = 1.25;
 
@@ -2182,7 +2183,9 @@ void GLCanvas3D::bind_event_handlers()
         m_canvas->Bind(wxEVT_TIMER, &GLCanvas3D::on_timer, this);
         m_canvas->Bind(EVT_GLCANVAS_RENDER_TIMER, &GLCanvas3D::on_render_timer, this);
         m_toolbar_highlighter.set_timer_owner(m_canvas, 0);
-        m_canvas->Bind(EVT_GLCANVAS_HIGHLIGHTER_TIMER, [this](wxTimerEvent&) { m_toolbar_highlighter.blink(); });
+        m_canvas->Bind(EVT_GLCANVAS_TOOLBAR_HIGHLIGHTER_TIMER, [this](wxTimerEvent&) { m_toolbar_highlighter.blink(); });
+        m_gizmo_highlighter.set_timer_owner(m_canvas, 0);
+        m_canvas->Bind(EVT_GLCANVAS_GIZMO_HIGHLIGHTER_TIMER, [this](wxTimerEvent&) { m_gizmo_highlighter.blink(); });
         m_canvas->Bind(wxEVT_LEFT_DOWN, &GLCanvas3D::on_mouse, this);
         m_canvas->Bind(wxEVT_LEFT_UP, &GLCanvas3D::on_mouse, this);
         m_canvas->Bind(wxEVT_MIDDLE_DOWN, &GLCanvas3D::on_mouse, this);
@@ -6505,6 +6508,14 @@ void GLCanvas3D::highlight_toolbar_item(const std::string& item_name)
     m_toolbar_highlighter.init(item, this);
 }
 
+void GLCanvas3D::highlight_gizmo(const std::string& gizmo_name)
+{
+    GLGizmoBase * gizmo = m_gizmos.get_gizmo_from_name(gizmo_name);
+    if(!gizmo)
+        return;
+    m_gizmo_highlighter.init(gizmo, this);
+}
+
 const Print* GLCanvas3D::fff_print() const
 {
     return (m_process == nullptr) ? nullptr : m_process->fff_print();
@@ -6524,14 +6535,19 @@ void GLCanvas3D::WipeTowerInfo::apply_wipe_tower() const
     wxGetApp().get_tab(Preset::TYPE_PRINT)->load_config(cfg);
 }
 
-void  GLCanvas3D::RenderTimer::Notify()
+void GLCanvas3D::RenderTimer::Notify()
 {
     wxPostEvent((wxEvtHandler*)GetOwner(), RenderTimerEvent( EVT_GLCANVAS_RENDER_TIMER, *this));
 }
 
-void  GLCanvas3D::HighlighterTimer::Notify()
+void GLCanvas3D::ToolbarHighlighterTimer::Notify()
 {
-    wxPostEvent((wxEvtHandler*)GetOwner(), HighlighterTimerEvent(EVT_GLCANVAS_HIGHLIGHTER_TIMER, *this));
+    wxPostEvent((wxEvtHandler*)GetOwner(), ToolbarHighlighterTimerEvent(EVT_GLCANVAS_TOOLBAR_HIGHLIGHTER_TIMER, *this));
+}
+
+void GLCanvas3D::GizmoHighlighterTimer::Notify()
+{
+    wxPostEvent((wxEvtHandler*)GetOwner(), GizmoHighlighterTimerEvent(EVT_GLCANVAS_GIZMO_HIGHLIGHTER_TIMER, *this));
 }
 
 void GLCanvas3D::ToolbarHighlighter::set_timer_owner(wxEvtHandler* owner, int timerid/* = wxID_ANY*/)
@@ -6575,6 +6591,58 @@ void GLCanvas3D::ToolbarHighlighter::blink()
             m_toolbar_item->set_state(GLToolbarItem::EState::HighlightedShown);
         else 
             m_toolbar_item->set_state(GLToolbarItem::EState::HighlightedHidden);
+
+        m_render_arrow = !m_render_arrow;
+        m_canvas->set_as_dirty();
+    }
+    else
+        invalidate();
+
+    if ((++m_blink_counter) == 11)
+        invalidate();
+}
+
+void GLCanvas3D::GizmoHighlighter::set_timer_owner(wxEvtHandler* owner, int timerid/* = wxID_ANY*/)
+{
+    m_timer.SetOwner(owner, timerid);
+}
+
+void GLCanvas3D::GizmoHighlighter::init(GLGizmoBase* gizmo, GLCanvas3D* canvas)
+{
+    if (m_timer.IsRunning())
+        invalidate();
+    if (!gizmo || !canvas)
+        return;
+
+    m_timer.Start(300, false);
+
+    m_gizmo = gizmo;
+    m_canvas = canvas;
+    m_item_state = gizmo->get_state();
+}
+
+void GLCanvas3D::GizmoHighlighter::invalidate()
+{
+    m_timer.Stop();
+
+    if (m_gizmo) {
+        m_gizmo->set_state((GLGizmoBase::EState)m_item_state);
+    }
+    m_gizmo = nullptr;
+    m_blink_counter = 0;
+    m_render_arrow = false;
+}
+
+void GLCanvas3D::GizmoHighlighter::blink()
+{
+    if (m_gizmo) {
+        char state = m_gizmo->get_state();
+        if (state != (char)GLGizmoBase::EState::HighlightedHidden && state != (char)GLGizmoBase::EState::HighlightedShown)
+            m_item_state = state;
+        if (state != (char)GLGizmoBase::EState::HighlightedShown)
+            m_gizmo->set_state(GLGizmoBase::EState::HighlightedShown);
+        else
+            m_gizmo->set_state(GLGizmoBase::EState::HighlightedHidden);
 
         m_render_arrow = !m_render_arrow;
         m_canvas->set_as_dirty();

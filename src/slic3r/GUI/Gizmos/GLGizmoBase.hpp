@@ -74,6 +74,8 @@ public:
     {
         Off,
         On,
+        HighlightedShown,
+        HighlightedHidden,
         Num_States
     };
 
@@ -159,6 +161,10 @@ public:
     void render_input_window(float x, float y, float bottom_limit);
 
     virtual std::string get_tooltip() const { return ""; }
+
+    // highlighting for Hint nottifications
+    bool get_highlighted()       const { return m_state == EState::HighlightedShown || m_state == EState::HighlightedHidden; }
+    bool get_highlighted_shown() const { return m_state == EState::HighlightedShown; }
 
 protected:
     virtual bool on_init() = 0;
