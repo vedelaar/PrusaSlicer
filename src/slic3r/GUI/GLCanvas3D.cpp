@@ -4406,7 +4406,6 @@ bool GLCanvas3D::_init_main_toolbar()
         BOOST_LOG_TRIVIAL(error) << "Gizmos manager failed to load arrow texture.";
     }
 
-
 //    m_main_toolbar.set_layout_type(GLToolbar::Layout::Vertical);
     m_main_toolbar.set_layout_type(GLToolbar::Layout::Horizontal);
     m_main_toolbar.set_horizontal_orientation(GLToolbar::Layout::HO_Right);
@@ -5344,7 +5343,7 @@ void GLCanvas3D::_render_main_toolbar()
     m_main_toolbar.render(*this);
     if (m_toolbar_highlighter.m_render_arrow)
     {
-        main_toolbar.render_arrow(*this, m_toolbar_highlighter.m_toolbar_item);
+        m_main_toolbar.render_arrow(*this, m_toolbar_highlighter.m_toolbar_item);
     }
 }
 

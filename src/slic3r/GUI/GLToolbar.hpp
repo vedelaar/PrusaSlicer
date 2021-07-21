@@ -316,7 +316,7 @@ public:
     bool update_items_state();
 
     void render(const GLCanvas3D& parent);
-    void render_arrow(const GLCanvas3D& parent, GLToolbarItem* highlighted_item) const;
+    void render_arrow(const GLCanvas3D& parent, GLToolbarItem* highlighted_item);
 
     bool on_mouse(wxMouseEvent& evt, GLCanvas3D& parent);
     // get item pointer for highlighter timer
