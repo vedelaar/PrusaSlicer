@@ -61,6 +61,7 @@ const NotificationManager::NotificationData NotificationManager::basic_notificat
 };
 
 namespace {
+	/* // not used?
 	ImFont* add_default_font(float pixel_size)
 	{
 		ImGuiIO& io = ImGui::GetIO();
@@ -71,7 +72,7 @@ namespace {
 		ImFont* font = io.Fonts->AddFontDefault(&config);
 		return font;
 	}
-
+	*/
 	inline void push_style_color(ImGuiCol idx, const ImVec4& col, bool fading_out, float current_fade_opacity)
 	{
 		if (fading_out)
@@ -372,6 +373,70 @@ void NotificationManager::PopNotification::set_next_window_size(ImGuiWrapper& im
 
 void NotificationManager::PopNotification::render_text(ImGuiWrapper& imgui, const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
 {
+	float	x_offset = m_left_indentation;
+	int		last_end = 0;
+	float	starting_y = (m_lines_count == 2 ? win_size_y / 2 - m_line_height : (m_lines_count == 1 ? win_size_y / 2 - m_line_height / 2 : m_line_height / 2));
+	float	shift_y = m_line_height;
+	std::string line;
+
+	for (size_t i = 0; i < (m_multiline ? m_endlines.size() : m_lines_count); i++) {
+		line.clear();
+		ImGui::SetCursorPosX(x_offset);
+		ImGui::SetCursorPosY(starting_y + i * shift_y);
+		if (m_endlines.size() > i && m_text1.size() >= m_endlines[i]) {
+			if (i == 1 && m_endlines.size() > 2 && !m_multiline) {
+				// second line with "more" hypertext
+				line = m_text1.substr(m_endlines[0] + (m_text1[m_endlines[0]] == '\n' || m_text1[m_endlines[0]] == ' ' ? 1 : 0), m_endlines[1] - m_endlines[0] - (m_text1[m_endlines[0]] == '\n' || m_text1[m_endlines[0]] == ' ' ? 1 : 0));
+				while (ImGui::CalcTextSize(line.c_str()).x > m_window_width - m_window_width_offset - ImGui::CalcTextSize((".." + _u8L("More")).c_str()).x) {
+					line = line.substr(0, line.length() - 1);
+				}
+				line += "..";
+			}
+			else {
+				// regural line
+				line = m_text1.substr(last_end, m_endlines[i] - last_end);
+			}
+			last_end = m_endlines[i];
+			if (m_text1.size() > m_endlines[i])
+				last_end += (m_text1[m_endlines[i]] == '\n' || m_text1[m_endlines[i]] == ' ' ? 1 : 0);
+			imgui.text(line.c_str());
+		}
+
+	}
+	//hyperlink text
+	if (!m_multiline && m_lines_count > 2) {
+		render_hypertext(imgui, x_offset + ImGui::CalcTextSize((line + " ").c_str()).x, starting_y + shift_y, _u8L("More"), true);
+	}
+	else if (!m_hypertext.empty()) {
+		render_hypertext(imgui, x_offset + ImGui::CalcTextSize((line + (line.empty() ? "" : " ")).c_str()).x, starting_y + (m_endlines.size() - 1) * shift_y, m_hypertext);
+	}
+
+	// text2
+	if (!m_text2.empty() && m_multiline) {
+		starting_y += (m_endlines.size() - 1) * shift_y;
+		last_end = 0;
+		for (size_t i = 0; i < (m_multiline ? m_endlines2.size() : 2); i++) {
+			if (i == 0) //first line X is shifted by hypertext
+				ImGui::SetCursorPosX(x_offset + ImGui::CalcTextSize((line + m_hypertext + (line.empty() ? " " : "  ")).c_str()).x);
+			else
+				ImGui::SetCursorPosX(x_offset);
+
+			ImGui::SetCursorPosY(starting_y + i * shift_y);
+			line.clear();
+			if (m_endlines2.size() > i && m_text2.size() >= m_endlines2[i]) {
+
+				// regural line
+				line = m_text2.substr(last_end, m_endlines2[i] - last_end);
+
+				last_end = m_endlines2[i];
+				if (m_text2.size() > m_endlines2[i])
+					last_end += (m_text2[m_endlines2[i]] == '\n' || m_text2[m_endlines2[i]] == ' ' ? 1 : 0);
+				imgui.text(line.c_str());
+			}
+
+		}
+	}
+	/*
 	ImVec2      win_size(win_size_x, win_size_y);
 	float       x_offset = m_left_indentation;
 	std::string fulltext = m_text1 + m_hypertext; //+ m_text2;
@@ -458,7 +523,8 @@ void NotificationManager::PopNotification::render_text(ImGuiWrapper& imgui, cons
 		if (!m_hypertext.empty()) {
 			render_hypertext(imgui, cursor_x + 4, cursor_y, m_hypertext);
 		}
-
+	}
+		*/
 		//notification text 2
 		//text 2 is suposed to be after the hyperlink - currently it is not used
 		/*
@@ -470,7 +536,6 @@ void NotificationManager::PopNotification::render_text(ImGuiWrapper& imgui, cons
 			imgui.text(m_text2.c_str());
 		}
 		*/
-	}
 }
 
 void NotificationManager::PopNotification::render_hypertext(ImGuiWrapper& imgui, const float text_x, const float text_y, const std::string text, bool more)

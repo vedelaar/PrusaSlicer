@@ -999,7 +999,6 @@ void GLGizmosManager::render_arrow(const GLCanvas3D& parent, GLGizmoBase* highli
     float cnv_w = (float)m_parent.get_canvas_size().get_width();
     float inv_zoom = (float)wxGetApp().plater()->get_camera().get_inv_zoom();
     float height = get_scaled_total_height();
-    float width = get_scaled_total_width();
     float zoomed_border = m_layout.scaled_border() * inv_zoom;
     float zoomed_top_x = (-0.5f * cnv_w) * inv_zoom;
     float zoomed_top_y = (0.5f * height) * inv_zoom;
