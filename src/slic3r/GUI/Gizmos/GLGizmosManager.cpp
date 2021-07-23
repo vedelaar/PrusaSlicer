@@ -137,7 +137,7 @@ bool GLGizmosManager::init_arrow(const BackgroundTexture::Metadata& arrow_textur
 
     if (!arrow_texture.filename.empty())
         res = m_arrow_texture.texture.load_from_file(path + arrow_texture.filename, false, GLTexture::SingleThreaded, false);
-
+//        res = m_arrow_texture.texture.load_from_svg_file(path + arrow_texture.filename, false, true, false, 100);
     if (res)
         m_arrow_texture.metadata = arrow_texture;
 
@@ -1021,8 +1021,10 @@ void GLGizmosManager::render_arrow(const GLCanvas3D& parent, GLGizmoBase* highli
             float internal_right_uv = 1.0f - (float)m_arrow_texture.metadata.right * inv_tex_width;
             float internal_top_uv = 1.0f - (float)m_arrow_texture.metadata.top * inv_tex_height;
             float internal_bottom_uv = (float)m_arrow_texture.metadata.bottom * inv_tex_height;
+            
+            float arrow_sides_ratio = (float)m_arrow_texture.texture.get_height() / (float)m_arrow_texture.texture.get_width();
 
-            GLTexture::render_sub_texture(tex_id, zoomed_top_x + zoomed_icons_size * 1.2f, zoomed_top_x + zoomed_icons_size * 2.2f, zoomed_top_y - zoomed_icons_size, zoomed_top_y, { { internal_left_uv, internal_top_uv }, { internal_left_uv, internal_bottom_uv }, { internal_right_uv, internal_bottom_uv }, { internal_right_uv, internal_top_uv } });
+            GLTexture::render_sub_texture(tex_id, zoomed_top_x + zoomed_icons_size * 1.2f, zoomed_top_x + zoomed_icons_size * 1.2f + zoomed_icons_size * arrow_sides_ratio, zoomed_top_y - zoomed_icons_size, zoomed_top_y, { { internal_left_uv, internal_top_uv }, { internal_left_uv, internal_bottom_uv }, { internal_right_uv, internal_bottom_uv }, { internal_right_uv, internal_top_uv } });
             break;
         }
         zoomed_top_y -= zoomed_stride_y;

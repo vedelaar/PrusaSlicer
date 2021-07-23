@@ -224,6 +224,7 @@ bool GLToolbar::init_arrow(const BackgroundTexture::Metadata& arrow_texture)
 
     if (!arrow_texture.filename.empty())
         res = m_arrow_texture.texture.load_from_file(path + arrow_texture.filename, false, GLTexture::SingleThreaded, false);
+//        res = m_arrow_texture.texture.load_from_svg_file(path + arrow_texture.filename, false, true, false, 100);
 
     if (res)
         m_arrow_texture.metadata = arrow_texture;
@@ -1201,9 +1202,7 @@ void GLToolbar::render_arrow(const GLCanvas3D& parent, GLToolbarItem* highlighte
 
     left += border;
     top -= separator_stride;
-
     float right = left + scaled_icons_size;
-    float bottom = top - scaled_icons_size;
 
     unsigned int tex_id = m_arrow_texture.texture.get_id();
     float tex_width = (float)m_icons_texture.get_width();
@@ -1216,7 +1215,9 @@ void GLToolbar::render_arrow(const GLCanvas3D& parent, GLToolbarItem* highlighte
         float internal_left = left + border;
         float internal_right = right - border;
         float internal_top = top - border;
-        float internal_bottom = bottom + border;
+        // bottom is not moving and should be calculated from arrow texture sides ratio
+        float arrow_sides_ratio = (float)m_arrow_texture.texture.get_height() / (float)m_arrow_texture.texture.get_width();
+        float internal_bottom = internal_top - (internal_right - internal_left) * arrow_sides_ratio;
 
         float internal_left_uv = (float)m_arrow_texture.metadata.left * inv_tex_width;
         float internal_right_uv = 1.0f - (float)m_arrow_texture.metadata.right * inv_tex_width;
@@ -1224,7 +1225,7 @@ void GLToolbar::render_arrow(const GLCanvas3D& parent, GLToolbarItem* highlighte
         float internal_bottom_uv = (float)m_arrow_texture.metadata.bottom * inv_tex_height;
 
         GLTexture::render_sub_texture(tex_id, internal_left, internal_right, internal_bottom, internal_top, { { internal_left_uv, internal_bottom_uv }, { internal_right_uv, internal_bottom_uv }, { internal_right_uv, internal_top_uv }, { internal_left_uv, internal_top_uv } });
-   }
+    }
 }
 
 void GLToolbar::render_horizontal(const GLCanvas3D& parent)
