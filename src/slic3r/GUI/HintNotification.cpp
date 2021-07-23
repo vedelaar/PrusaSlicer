@@ -504,7 +504,7 @@ void NotificationManager::HintNotification::render_right_arrow_button(ImGuiWrapp
 	if (m_lines_count <= 3)
 		ImGui::SetCursorPosY(m_close_b_y + m_close_b_w / 4.f * 7.f);
 	else
-		ImGui::SetCursorPosY(m_window_height - button_size.y - 5);
+		ImGui::SetCursorPosY(m_window_height - button_size.y - m_close_b_w / 4.f);
 	if (imgui.button(button_text.c_str(), button_size.x * 0.8f, button_size.y * 1.f))
 	{
 		retrieve_data();
