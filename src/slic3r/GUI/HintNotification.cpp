@@ -311,11 +311,6 @@ void NotificationManager::HintNotification::render_text(ImGuiWrapper& imgui, con
     if (!m_has_hint_data)
         retrieve_data();
 
-	render_right_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
-	render_left_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
-	render_preferences_button(imgui, win_pos_x, win_pos_y);
-	//NotificationManager::PopNotification::render_text(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
-
 	float	x_offset = m_left_indentation;
 	int		last_end = 0;
 	float	starting_y = (m_lines_count == 2 ? win_size_y / 2 - m_line_height :(m_lines_count == 1 ? win_size_y / 2 - m_line_height / 2: m_line_height / 2));
@@ -412,9 +407,9 @@ void NotificationManager::HintNotification::render_close_button(ImGuiWrapper& im
 	}
 	ImVec2 button_pic_size = ImGui::CalcTextSize(button_text.c_str());
 	ImVec2 button_size(button_pic_size.x * 1.25f, button_pic_size.y * 1.25f);
+	m_close_b_w = button_size.y;
 	if (m_lines_count <= 3) {
-		m_close_b_w = button_size.y;
-		m_close_b_y = win_size.y / 2 - button_size.y * 1.25f - 5;
+		m_close_b_y = win_size.y / 2 - button_size.y * 1.25f /*- m_close_b_w / 4.f*/;
 		ImGui::SetCursorPosX(win_size.x - m_line_height * 2.75f);
 		ImGui::SetCursorPosY(m_close_b_y);
 	} else {
@@ -439,6 +434,11 @@ void NotificationManager::HintNotification::render_close_button(ImGuiWrapper& im
 	ImGui::PopStyleColor();
 	ImGui::PopStyleColor();
 	ImGui::PopStyleColor();
+
+
+	render_right_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
+	render_left_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
+	render_preferences_button(imgui, win_pos_x, win_pos_y);
 }
 
 void NotificationManager::HintNotification::render_preferences_button(ImGuiWrapper& imgui, const float win_pos_x, const float win_pos_y)
@@ -464,9 +464,9 @@ void NotificationManager::HintNotification::render_preferences_button(ImGuiWrapp
 	ImVec2 button_size(button_pic_size.x * 1.25f, button_pic_size.y * 1.25f);
 	ImGui::SetCursorPosX(m_window_width - m_line_height * 1.75f);
 	if (m_lines_count <= 3) {
-		ImGui::SetCursorPosY(m_close_b_y + m_close_b_w + 20);
+		ImGui::SetCursorPosY(m_close_b_y + m_close_b_w / 4.f * 7.f);
 	} else {
-		ImGui::SetCursorPosY(m_window_height - button_size.y - 5);
+		ImGui::SetCursorPosY(m_window_height - button_size.y - m_close_b_w / 4.f);
 	}
 	if (imgui.button(button_text.c_str(), button_size.x, button_size.y))
 	{
@@ -484,6 +484,8 @@ void NotificationManager::HintNotification::render_preferences_button(ImGuiWrapp
 
 void NotificationManager::HintNotification::render_right_arrow_button(ImGuiWrapper& imgui, const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
 {
+	// Used for debuging
+
 	ImVec2 win_size(win_size_x, win_size_y);
 	ImVec2 win_pos(win_pos_x, win_pos_y);
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
@@ -494,37 +496,20 @@ void NotificationManager::HintNotification::render_right_arrow_button(ImGuiWrapp
 
 	std::string button_text;
 	button_text = ImGui::RightArrowButton;
-	/*
-	if (ImGui::IsMouseHoveringRect(ImVec2(win_pos.x - m_line_height * 5.f, win_pos.y),
-		ImVec2(win_pos.x - m_line_height * 2.5f, win_pos.y + win_size.y),
-		true))
-	{
-		button_text = ImGui::RightArrowHoverButton;
-	}
-	*/
 	
 	ImVec2 button_pic_size = ImGui::CalcTextSize(button_text.c_str());
 	ImVec2 button_size(button_pic_size.x * 1.25f, button_pic_size.y * 1.25f);
-	//ImGui::SetCursorPosX(win_size.x - m_line_height * 5.0f);
-	//ImGui::SetCursorPosY(win_size.y / 2 - button_size.y);
+
 	ImGui::SetCursorPosX(m_window_width - m_line_height * 3.f);
 	if (m_lines_count <= 3)
-		ImGui::SetCursorPosY(m_close_b_y + m_close_b_w + 20);
+		ImGui::SetCursorPosY(m_close_b_y + m_close_b_w / 4.f * 7.f);
 	else
 		ImGui::SetCursorPosY(m_window_height - button_size.y - 5);
 	if (imgui.button(button_text.c_str(), button_size.x * 0.8f, button_size.y * 1.f))
 	{
 		retrieve_data();
 	}
-	/*
-	//invisible large button
-	ImGui::SetCursorPosX(win_size.x - m_line_height * 4.625f);
-	ImGui::SetCursorPosY(0);
-	if (imgui.button("  ", m_line_height * 2.f, win_size.y))
-	{
-		retrieve_data();
-	}
-	*/
+
 	ImGui::PopStyleColor();
 	ImGui::PopStyleColor();
 	ImGui::PopStyleColor();
@@ -533,6 +518,9 @@ void NotificationManager::HintNotification::render_right_arrow_button(ImGuiWrapp
 }
 void NotificationManager::HintNotification::render_left_arrow_button(ImGuiWrapper& imgui, const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
 {
+	// TODO: Delete this function? Not used.
+
+
 	ImVec2 win_size(win_size_x, win_size_y);
 	ImVec2 win_pos(win_pos_x, win_pos_y);
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
