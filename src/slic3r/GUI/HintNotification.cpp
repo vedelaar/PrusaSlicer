@@ -400,7 +400,7 @@ void NotificationManager::HintNotification::render_close_button(ImGuiWrapper& im
 	button_text = ImGui::CloseNotifButton;
 
 	if (ImGui::IsMouseHoveringRect(ImVec2(win_pos.x - win_size.x / 10.f, win_pos.y),
-		ImVec2(win_pos.x, win_pos.y + win_size.y - (m_minimize_b_visible ? 2 * m_line_height : 0)),
+		ImVec2(win_pos.x, win_pos.y + win_size.y - 2 * m_line_height),
 		true))
 	{
 		button_text = ImGui::CloseNotifHoverButton;
@@ -409,7 +409,7 @@ void NotificationManager::HintNotification::render_close_button(ImGuiWrapper& im
 	ImVec2 button_size(button_pic_size.x * 1.25f, button_pic_size.y * 1.25f);
 	m_close_b_w = button_size.y;
 	if (m_lines_count <= 3) {
-		m_close_b_y = win_size.y / 2 - button_size.y * 1.25f /*- m_close_b_w / 4.f*/;
+		m_close_b_y = win_size.y / 2 - button_size.y * 1.25f;
 		ImGui::SetCursorPosX(win_size.x - m_line_height * 2.75f);
 		ImGui::SetCursorPosY(m_close_b_y);
 	} else {
@@ -420,15 +420,15 @@ void NotificationManager::HintNotification::render_close_button(ImGuiWrapper& im
 	{
 		close();
 	}
-	/*
+	
 	//invisible large button
 	ImGui::SetCursorPosX(win_size.x - m_line_height * 2.35f);
 	ImGui::SetCursorPosY(0);
-	if (imgui.button(" ", m_line_height * 2.125, win_size.y - (m_minimize_b_visible ? 2 * m_line_height : 0)))
+	if (imgui.button(" ", m_line_height * 2.125, win_size.y -  2 * m_line_height))
 	{
 		close();
 	}
-	*/
+	
 	ImGui::PopStyleColor();
 	ImGui::PopStyleColor();
 	ImGui::PopStyleColor();
@@ -478,8 +478,8 @@ void NotificationManager::HintNotification::render_preferences_button(ImGuiWrapp
 	ImGui::PopStyleColor();
 	ImGui::PopStyleColor();
 	ImGui::PopStyleColor();
-	m_minimize_b_visible = true;
-	
+	// preferences button is in place of minimize button
+	m_minimize_b_visible = true;	
 }
 
 void NotificationManager::HintNotification::render_right_arrow_button(ImGuiWrapper& imgui, const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
