@@ -317,7 +317,9 @@ void NotificationManager::PopNotification::count_lines()
 					next_space = text.length();
 				}
 				// when one word longer than line.
-				if (ImGui::CalcTextSize(text.substr(last_end, next_space - last_end).c_str()).x > m_window_width - m_window_width_offset) {
+				if (ImGui::CalcTextSize(text.substr(last_end, next_space - last_end).c_str()).x > m_window_width - m_window_width_offset ||
+					ImGui::CalcTextSize(text.substr(last_end, next_space - last_end).c_str()).x < (m_window_width - m_window_width_offset) / 4 * 3
+					) {
 					float width_of_a = ImGui::CalcTextSize("a").x;
 					int letter_count = (int)((m_window_width - m_window_width_offset) / width_of_a);
 					while (last_end + letter_count < text.size() && ImGui::CalcTextSize(text.substr(last_end, letter_count).c_str()).x < m_window_width - m_window_width_offset) {
@@ -346,6 +348,9 @@ void NotificationManager::PopNotification::count_lines()
 			m_lines_count++;
 		}
 	}
+
+	// m_text_2 (text after hypertext) is not used for regular notifications right now.
+	// its caluculation is in HintNotification::count_lines()
 }
 
 void NotificationManager::PopNotification::init()
@@ -379,9 +384,9 @@ void NotificationManager::PopNotification::render_text(ImGuiWrapper& imgui, cons
 	float	shift_y = m_line_height;
 	std::string line;
 
-	for (size_t i = 0; i < (m_multiline ? m_endlines.size() : m_lines_count); i++) {
+	for (size_t i = 0; i < (m_multiline ? m_endlines.size() : std::min(m_endlines.size(), (size_t)2)); i++) {
 		line.clear();
-		ImGui::SetCursorPosX(x_offset);
+		ImGui::SetCursorPosX(x_offset);     
 		ImGui::SetCursorPosY(starting_y + i * shift_y);
 		if (m_endlines.size() > i && m_text1.size() >= m_endlines[i]) {
 			if (i == 1 && m_endlines.size() > 2 && !m_multiline) {
@@ -401,7 +406,6 @@ void NotificationManager::PopNotification::render_text(ImGuiWrapper& imgui, cons
 				last_end += (m_text1[m_endlines[i]] == '\n' || m_text1[m_endlines[i]] == ' ' ? 1 : 0);
 			imgui.text(line.c_str());
 		}
-
 	}
 	//hyperlink text
 	if (!m_multiline && m_lines_count > 2) {
@@ -411,131 +415,8 @@ void NotificationManager::PopNotification::render_text(ImGuiWrapper& imgui, cons
 		render_hypertext(imgui, x_offset + ImGui::CalcTextSize((line + (line.empty() ? "" : " ")).c_str()).x, starting_y + (m_endlines.size() - 1) * shift_y, m_hypertext);
 	}
 
-	// text2
-	if (!m_text2.empty() && m_multiline) {
-		starting_y += (m_endlines.size() - 1) * shift_y;
-		last_end = 0;
-		for (size_t i = 0; i < (m_multiline ? m_endlines2.size() : 2); i++) {
-			if (i == 0) //first line X is shifted by hypertext
-				ImGui::SetCursorPosX(x_offset + ImGui::CalcTextSize((line + m_hypertext + (line.empty() ? " " : "  ")).c_str()).x);
-			else
-				ImGui::SetCursorPosX(x_offset);
-
-			ImGui::SetCursorPosY(starting_y + i * shift_y);
-			line.clear();
-			if (m_endlines2.size() > i && m_text2.size() >= m_endlines2[i]) {
-
-				// regural line
-				line = m_text2.substr(last_end, m_endlines2[i] - last_end);
-
-				last_end = m_endlines2[i];
-				if (m_text2.size() > m_endlines2[i])
-					last_end += (m_text2[m_endlines2[i]] == '\n' || m_text2[m_endlines2[i]] == ' ' ? 1 : 0);
-				imgui.text(line.c_str());
-			}
-
-		}
-	}
-	/*
-	ImVec2      win_size(win_size_x, win_size_y);
-	float       x_offset = m_left_indentation;
-	std::string fulltext = m_text1 + m_hypertext; //+ m_text2;
-	ImVec2      text_size = ImGui::CalcTextSize(fulltext.c_str());
-	// text posistions are calculated by lines count
-	// large texts has "more" button or are displayed whole
-	// smaller texts are divided as one liners and two liners
-	if (m_lines_count > 2) {
-		if (m_multiline) {
-			
-			int last_end = 0;
-			float starting_y = m_line_height/2;
-			float shift_y = m_line_height;
-			std::string line;
-
-			for (size_t i = 0; i < m_lines_count; i++) {
-				line.clear();
-				ImGui::SetCursorPosX(x_offset);
-				ImGui::SetCursorPosY(starting_y + i * shift_y);
-				if (m_endlines.size() > i && m_text1.size() >= m_endlines[i]) {
-					line = m_text1.substr(last_end, m_endlines[i] - last_end);
-					last_end = m_endlines[i];
-					if (m_text1.size() > m_endlines[i])
-						last_end += (m_text1[m_endlines[i]] == '\n' || m_text1[m_endlines[i]] == ' ' ? 1 : 0);
-					imgui.text(line.c_str());
-				}
-			}
-			//hyperlink text
-			if (!m_hypertext.empty()) {
-				render_hypertext(imgui, x_offset + ImGui::CalcTextSize((line + (line.empty() ? "" : " ")).c_str()).x, starting_y + (m_lines_count - 1) * shift_y, m_hypertext);
-			}
-			
-			
-		} else {
-			// line1
-			if (m_text1.size() >= m_endlines[0]) {
-				ImGui::SetCursorPosX(x_offset);
-				ImGui::SetCursorPosY(win_size.y / 2 - win_size.y / 6 - m_line_height / 2);
-				imgui.text(m_text1.substr(0, m_endlines[0]).c_str());
-			}
-			// line2
-			std::string line;
-			ImGui::SetCursorPosX(x_offset);
-			ImGui::SetCursorPosY(win_size.y / 2 + win_size.y / 6 - m_line_height / 2);
-			if (m_text1.size() >= m_endlines[1]) {
-				line = m_text1.substr(m_endlines[0] + (m_text1[m_endlines[0]] == '\n' || m_text1[m_endlines[0]] == ' ' ? 1 : 0), m_endlines[1] - m_endlines[0] - (m_text1[m_endlines[0]] == '\n' || m_text1[m_endlines[0]] == ' ' ? 1 : 0));
-				if (ImGui::CalcTextSize(line.c_str()).x > m_window_width - m_window_width_offset - ImGui::CalcTextSize((".." + _u8L("More")).c_str()).x) {
-					line = line.substr(0, line.length() - 6);
-					line += "..";
-				} else
-					line += "  ";
-				imgui.text(line.c_str());
-			}
-			// "More" hypertext
-			render_hypertext(imgui, x_offset + ImGui::CalcTextSize(line.c_str()).x, win_size.y / 2 + win_size.y / 6 - m_line_height / 2, _u8L("More"), true);			
-		}
-	} else {
-		//text 1
-		float cursor_y = win_size.y / 2 - text_size.y / 2;
-		float cursor_x = x_offset;
-		if(m_lines_count > 1) {
-			// line1
-			if (m_text1.length() >= m_endlines[0]) { // could be equal than substr takes whole string
-				ImGui::SetCursorPosX(x_offset);
-				ImGui::SetCursorPosY(win_size.y / 2 - win_size.y / 6 - m_line_height / 2);
-				imgui.text(m_text1.substr(0, m_endlines[0]).c_str());
-			}
-			// line2
-			ImGui::SetCursorPosX(x_offset);
-			cursor_y = win_size.y / 2 + win_size.y / 6 - m_line_height / 2;
-			ImGui::SetCursorPosY(cursor_y);
-			if (m_text1.length() > m_endlines[0]) { // must be greater otherwise theres nothing to show and m_text1[m_endlines[0]] is beyond last letter
-				std::string line = m_text1.substr(m_endlines[0] + (m_text1[m_endlines[0]] == '\n' || m_text1[m_endlines[0]] == ' ' ? 1 : 0));
-				imgui.text(line.c_str());
-				cursor_x = x_offset + ImGui::CalcTextSize(line.c_str()).x;
-			}
-		} else {
-			ImGui::SetCursorPosX(x_offset);
-			ImGui::SetCursorPosY(cursor_y);
-			imgui.text(m_text1.c_str());
-			cursor_x = x_offset + ImGui::CalcTextSize(m_text1.c_str()).x;
-		}
-		//hyperlink text
-		if (!m_hypertext.empty()) {
-			render_hypertext(imgui, cursor_x + 4, cursor_y, m_hypertext);
-		}
-	}
-		*/
-		//notification text 2
-		//text 2 is suposed to be after the hyperlink - currently it is not used
-		/*
-		if (!m_text2.empty())
-		{
-			ImVec2 part_size = ImGui::CalcTextSize(m_hypertext.c_str());
-			ImGui::SetCursorPosX(win_size.x / 2 + text_size.x / 2 - part_size.x + 8 - x_offset);
-			ImGui::SetCursorPosY(cursor_y);
-			imgui.text(m_text2.c_str());
-		}
-		*/
+	// text2 (text after hypertext) is not rendered for regular notifications
+	// its rendering is in HintNotification::render_text
 }
 
 void NotificationManager::PopNotification::render_hypertext(ImGuiWrapper& imgui, const float text_x, const float text_y, const std::string text, bool more)
