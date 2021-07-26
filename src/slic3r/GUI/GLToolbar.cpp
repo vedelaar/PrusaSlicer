@@ -123,35 +123,6 @@ void GLToolbarItem::render(unsigned int tex_id, float left, float right, float b
     }
 }
 
-void GLToolbarItem::render_arrow(unsigned int tex_id, float left, float right, float bottom, float top, unsigned int tex_width, unsigned int tex_height, unsigned int icon_size) const
-{
-    auto uvs = [this](unsigned int tex_width, unsigned int tex_height, unsigned int icon_size) -> GLTexture::Quad_UVs
-    {
-        assert((tex_width != 0) && (tex_height != 0));
-        GLTexture::Quad_UVs ret;
-        // tiles in the texture are spaced by 1 pixel
-        float icon_size_px = (float)(tex_width - 1) / (float)Num_States;
-        float inv_tex_width = 1.0f / (float)tex_width;
-        float inv_tex_height = 1.0f / (float)tex_height;
-        // tiles in the texture are spaced by 1 pixel
-        float u_offset = 1.0f * inv_tex_width;
-        float v_offset = 1.0f * inv_tex_height;
-        float du = icon_size_px * inv_tex_width;
-        float dv = icon_size_px * inv_tex_height;
-        float left = u_offset + (float)m_state * du;
-        float right = left + du - u_offset;
-        float top = v_offset + (float)m_data.sprite_id * dv;
-        float bottom = top + dv - v_offset;
-        ret.left_top = { left, top };
-        ret.left_bottom = { left, bottom };
-        ret.right_bottom = { right, bottom };
-        ret.right_top = { right, top };
-        return ret;
-    };
-
-    GLTexture::render_sub_texture(tex_id, left, right, bottom - 20, top - 20, uvs(tex_width, tex_height, icon_size));
-}
-
 BackgroundTexture::Metadata::Metadata()
     : filename("")
     , left(0)
@@ -1212,8 +1183,8 @@ void GLToolbar::render_arrow(const GLCanvas3D& parent, GLToolbarItem* highlighte
         float inv_tex_width = (tex_width != 0.0f) ? 1.0f / tex_width : 0.0f;
         float inv_tex_height = (tex_height != 0.0f) ? 1.0f / tex_height : 0.0f;
 
-        float internal_left = left + border;
-        float internal_right = right - border;
+        float internal_left = left + border - scaled_icons_size / 2; // add half scaled_icons_size for huge arrow
+        float internal_right = right - border + scaled_icons_size / 2;
         float internal_top = top - border;
         // bottom is not moving and should be calculated from arrow texture sides ratio
         float arrow_sides_ratio = (float)m_arrow_texture.texture.get_height() / (float)m_arrow_texture.texture.get_width();

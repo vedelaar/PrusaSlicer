@@ -1016,6 +1016,7 @@ void GLGizmosManager::render_arrow(const GLCanvas3D& parent, EType highlighted_t
             unsigned int tex_id = m_arrow_texture.texture.get_id();
             float inv_tex_width = (tex_width != 0.0f) ? 1.0f / tex_width : 0.0f;
             float inv_tex_height = (tex_height != 0.0f) ? 1.0f / tex_height : 0.0f;
+
             float internal_left_uv = (float)m_arrow_texture.metadata.left * inv_tex_width;
             float internal_right_uv = 1.0f - (float)m_arrow_texture.metadata.right * inv_tex_width;
             float internal_top_uv = 1.0f - (float)m_arrow_texture.metadata.top * inv_tex_height;

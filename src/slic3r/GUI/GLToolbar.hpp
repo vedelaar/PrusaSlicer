@@ -155,7 +155,6 @@ public:
     bool update_enabled_state();
 
     void render(unsigned int tex_id, float left, float right, float bottom, float top, unsigned int tex_width, unsigned int tex_height, unsigned int icon_size) const;
-    void render_arrow(unsigned int tex_id, float left, float right, float bottom, float top, unsigned int tex_width, unsigned int tex_height, unsigned int icon_size) const;
 private:
     void set_visible(bool visible) { m_data.visible = visible; }
 
