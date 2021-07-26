@@ -62,9 +62,15 @@ public:
         Hover,
         HoverPressed,
         HoverDisabled,
+        Num_States
+    };
+
+    enum EHighlightState : unsigned char
+    {
         HighlightedShown,
         HighlightedHidden,
-        Num_States
+        Num_Rendered_Highlight_States,
+        NotHighlighted
     };
 
     struct Data
@@ -106,12 +112,15 @@ private:
     EState m_state;
     Data m_data;
     EActionType m_last_action_type;
-
+    EHighlightState m_highlight_state;
 public:
     GLToolbarItem(EType type, const Data& data);
 
     EState get_state() const { return m_state; }
     void set_state(EState state) { m_state = state; }
+
+    EHighlightState get_highlight() const { return m_highlight_state; }
+    void set_highlight(EHighlightState state) { m_highlight_state = state; }
 
     const std::string& get_name() const { return m_data.name; }
     const std::string& get_icon_filename() const { return m_data.icon_filename; }

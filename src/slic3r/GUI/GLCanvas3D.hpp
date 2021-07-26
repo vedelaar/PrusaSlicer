@@ -577,9 +577,7 @@ private:
     private:
         GLCanvas3D*             m_canvas{ nullptr };
         int				        m_blink_counter{ 0 };
-        ToolbarHighlighterTimer m_timer;
-        char                    m_item_state{ 0 };
-       
+        ToolbarHighlighterTimer m_timer;       
     }
     m_toolbar_highlighter;
 

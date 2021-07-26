@@ -61,6 +61,7 @@ GLToolbarItem::GLToolbarItem(GLToolbarItem::EType type, const GLToolbarItem::Dat
     , m_state(Normal)
     , m_data(data)
     , m_last_action_type(Undefined)
+    , m_highlight_state(NotHighlighted)
 {
 }
 
@@ -76,8 +77,6 @@ bool GLToolbarItem::update_visibility()
 
 bool GLToolbarItem::update_enabled_state()
 {
-    if (is_highlighted())
-        return false; //if highlighted, we dont want to change state until highlight ends.
     bool enabled = m_data.enabling_callback();
     bool ret = (is_enabled() != enabled);
     if (ret)
@@ -93,7 +92,8 @@ void GLToolbarItem::render(unsigned int tex_id, float left, float right, float b
         assert((tex_width != 0) && (tex_height != 0));
         GLTexture::Quad_UVs ret;
         // tiles in the texture are spaced by 1 pixel
-        float icon_size_px = (float)(tex_width - 1) / (float)Num_States;
+        float icon_size_px = (float)(tex_width - 1) / ((float)Num_States + (float)Num_Rendered_Highlight_States);
+        char render_state = (m_highlight_state ==  NotHighlighted ? m_state : Num_States + m_highlight_state);
         float inv_tex_width = 1.0f / (float)tex_width;
         float inv_tex_height = 1.0f / (float)tex_height;
         // tiles in the texture are spaced by 1 pixel
@@ -101,7 +101,7 @@ void GLToolbarItem::render(unsigned int tex_id, float left, float right, float b
         float v_offset = 1.0f * inv_tex_height;
         float du = icon_size_px * inv_tex_width;
         float dv = icon_size_px * inv_tex_height;
-        float left = u_offset + (float)m_state * du;
+        float left = u_offset + (float)render_state * du;
         float right = left + du - u_offset;
         float top = v_offset + (float)m_data.sprite_id * dv;
         float bottom = top + dv - v_offset;

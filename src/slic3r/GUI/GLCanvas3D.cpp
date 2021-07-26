@@ -6581,7 +6581,6 @@ void GLCanvas3D::ToolbarHighlighter::init(GLToolbarItem* toolbar_item, GLCanvas3
 
     m_toolbar_item = toolbar_item;
     m_canvas       = canvas;
-    m_item_state   = toolbar_item->get_state();
 }
 
 void GLCanvas3D::ToolbarHighlighter::invalidate()
@@ -6589,7 +6588,7 @@ void GLCanvas3D::ToolbarHighlighter::invalidate()
     m_timer.Stop();
 
     if (m_toolbar_item) {
-        m_toolbar_item->set_state((GLToolbarItem::EState)m_item_state);
+        m_toolbar_item->set_highlight(GLToolbarItem::EHighlightState::NotHighlighted);
     }
     m_toolbar_item = nullptr;
     m_blink_counter = 0;
@@ -6599,13 +6598,11 @@ void GLCanvas3D::ToolbarHighlighter::invalidate()
 void GLCanvas3D::ToolbarHighlighter::blink()
 {
     if (m_toolbar_item) {
-        char state = m_toolbar_item->get_state();
-        if (state != (char)GLToolbarItem::EState::HighlightedHidden && state != (char)GLToolbarItem::EState::HighlightedShown)
-            m_item_state = state;
-        if (state != (char)GLToolbarItem::EState::HighlightedShown)
-            m_toolbar_item->set_state(GLToolbarItem::EState::HighlightedShown);
+        char state = m_toolbar_item->get_highlight();
+        if (state != (char)GLToolbarItem::EHighlightState::HighlightedShown)
+            m_toolbar_item->set_highlight(GLToolbarItem::EHighlightState::HighlightedShown);
         else 
-            m_toolbar_item->set_state(GLToolbarItem::EState::HighlightedHidden);
+            m_toolbar_item->set_highlight(GLToolbarItem::EHighlightState::HighlightedHidden);
 
         m_render_arrow = !m_render_arrow;
         m_canvas->set_as_dirty();
