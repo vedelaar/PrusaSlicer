@@ -5328,7 +5328,7 @@ void GLCanvas3D::_render_gizmos_overlay()
 
     if (m_gizmo_highlighter.m_render_arrow)
     {
-        m_gizmos.render_arrow(*this, m_gizmo_highlighter.m_gizmo);
+        m_gizmos.render_arrow(*this, m_gizmo_highlighter.m_gizmo_type);
     }
 }
 
@@ -6525,10 +6525,10 @@ void GLCanvas3D::highlight_toolbar_item(const std::string& item_name)
 
 void GLCanvas3D::highlight_gizmo(const std::string& gizmo_name)
 {
-    GLGizmoBase * gizmo = m_gizmos.get_gizmo_from_name(gizmo_name);
-    if(!gizmo)
+    GLGizmosManager::EType gizmo = m_gizmos.get_gizmo_from_name(gizmo_name);
+    if(gizmo == GLGizmosManager::EType::Undefined)
         return;
-    m_gizmo_highlighter.init(gizmo, this);
+    m_gizmo_highlighter.init(&m_gizmos, gizmo, this);
 }
 
 const Print* GLCanvas3D::fff_print() const
@@ -6610,7 +6610,7 @@ void GLCanvas3D::ToolbarHighlighter::blink()
     else
         invalidate();
 
-    if ((++m_blink_counter) == 11)
+    if ((++m_blink_counter) >= 11)
         invalidate();
 }
 
@@ -6619,7 +6619,7 @@ void GLCanvas3D::GizmoHighlighter::set_timer_owner(wxEvtHandler* owner, int time
     m_timer.SetOwner(owner, timerid);
 }
 
-void GLCanvas3D::GizmoHighlighter::init(GLGizmoBase* gizmo, GLCanvas3D* canvas)
+void GLCanvas3D::GizmoHighlighter::init(GLGizmosManager* manager, GLGizmosManager::EType gizmo, GLCanvas3D* canvas)
 {
     if (m_timer.IsRunning())
         invalidate();
@@ -6628,33 +6628,31 @@ void GLCanvas3D::GizmoHighlighter::init(GLGizmoBase* gizmo, GLCanvas3D* canvas)
 
     m_timer.Start(300, false);
 
-    m_gizmo = gizmo;
-    m_canvas = canvas;
-    m_item_state = gizmo->get_state();
+    m_gizmo_manager = manager;
+    m_gizmo_type    = gizmo;
+    m_canvas        = canvas;
 }
 
 void GLCanvas3D::GizmoHighlighter::invalidate()
 {
     m_timer.Stop();
 
-    if (m_gizmo) {
-        m_gizmo->set_state((GLGizmoBase::EState)m_item_state);
+    if (m_gizmo_manager) {
+        m_gizmo_manager->set_highlight(GLGizmosManager::EType::Undefined, false);
     }
-    m_gizmo = nullptr;
+    m_gizmo_manager = nullptr;
+    m_gizmo_type = GLGizmosManager::EType::Undefined;
     m_blink_counter = 0;
     m_render_arrow = false;
 }
 
 void GLCanvas3D::GizmoHighlighter::blink()
 {
-    if (m_gizmo) {
-        char state = m_gizmo->get_state();
-        if (state != (char)GLGizmoBase::EState::HighlightedHidden && state != (char)GLGizmoBase::EState::HighlightedShown)
-            m_item_state = state;
-        if (state != (char)GLGizmoBase::EState::HighlightedShown)
-            m_gizmo->set_state(GLGizmoBase::EState::HighlightedShown);
+    if (m_gizmo_manager) {
+        if (m_blink_counter % 2 == 0)
+            m_gizmo_manager->set_highlight(m_gizmo_type, true);
         else
-            m_gizmo->set_state(GLGizmoBase::EState::HighlightedHidden);
+            m_gizmo_manager->set_highlight(m_gizmo_type, false);
 
         m_render_arrow = !m_render_arrow;
         m_canvas->set_as_dirty();
@@ -6662,7 +6660,7 @@ void GLCanvas3D::GizmoHighlighter::blink()
     else
         invalidate();
 
-    if ((++m_blink_counter) == 11)
+    if ((++m_blink_counter) >= 11)
         invalidate();
 }
 

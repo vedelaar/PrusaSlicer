@@ -584,16 +584,17 @@ private:
     struct GizmoHighlighter
     {
         void set_timer_owner(wxEvtHandler* owner, int timerid = wxID_ANY);
-        void init(GLGizmoBase* gizmo, GLCanvas3D* canvas);
+        void init(GLGizmosManager* manager, GLGizmosManager::EType gizmo, GLCanvas3D* canvas);
         void blink();
         void invalidate();
         bool                    m_render_arrow{ false };
-        GLGizmoBase*            m_gizmo{ nullptr };
+        GLGizmosManager::EType  m_gizmo_type;
     private:
+        GLGizmosManager*        m_gizmo_manager{ nullptr };
         GLCanvas3D*             m_canvas{ nullptr };
         int				        m_blink_counter{ 0 };
         GizmoHighlighterTimer   m_timer;
-        char                    m_item_state{ 0 };
+
     }
     m_gizmo_highlighter;
 

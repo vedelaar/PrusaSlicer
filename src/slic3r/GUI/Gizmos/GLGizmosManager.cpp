@@ -123,6 +123,7 @@ bool GLGizmosManager::init()
 
     m_current = Undefined;
     m_hover = Undefined;
+    m_highlight = std::pair<EType, bool>(Undefined, false);
 
     return true;
 }
@@ -990,7 +991,7 @@ void GLGizmosManager::render_background(float left, float top, float right, floa
     }
 }
 
-void GLGizmosManager::render_arrow(const GLCanvas3D& parent, GLGizmoBase* highlighted_item) const
+void GLGizmosManager::render_arrow(const GLCanvas3D& parent, EType highlighted_type) const
 {
     
     std::vector<size_t> selectable_idxs = get_selectable_idxs();
@@ -1009,9 +1010,7 @@ void GLGizmosManager::render_arrow(const GLCanvas3D& parent, GLGizmoBase* highli
     float zoomed_stride_y = m_layout.scaled_stride_y() * inv_zoom;
     for (size_t idx : selectable_idxs)
     {
-        GLGizmoBase* gizmo = m_gizmos[idx].get();
-        if (gizmo == highlighted_item)
-        {      
+        if (idx == highlighted_type) {      
             int tex_width = m_icons_texture.get_width();
             int tex_height = m_icons_texture.get_height();
             unsigned int tex_id = m_arrow_texture.texture.get_id();
@@ -1081,8 +1080,8 @@ void GLGizmosManager::do_render_overlay() const
     {
         GLGizmoBase* gizmo = m_gizmos[idx].get();
         unsigned int sprite_id = gizmo->get_sprite_id();
-        // higlighted state needs to be decided first so its highlighting in every other state (GizmoHighlighter will restore state after)
-        int icon_idx = (gizmo->get_highlighted() ? (gizmo->get_highlighted_shown() ? 4 : 5) : (m_current == idx) ? 2 : ((m_hover == idx) ? 1 : (gizmo->is_activable()? 0 : 3)));
+        // higlighted state needs to be decided first so its highlighting in every other state
+        int icon_idx = (m_highlight.first == idx ? (m_highlight.second ? 4 : 5) : (m_current == idx) ? 2 : ((m_hover == idx) ? 1 : (gizmo->is_activable()? 0 : 3)));
 
         float v_top = v_offset + sprite_id * dv;
         float u_left = u_offset + icon_idx * du;
@@ -1113,18 +1112,17 @@ GLGizmoBase* GLGizmosManager::get_current() const
     return ((m_current == Undefined) || m_gizmos.empty()) ? nullptr : m_gizmos[m_current].get();
 }
 
-GLGizmoBase* GLGizmosManager::get_gizmo_from_name(const std::string& gizmo_name) const
+GLGizmosManager::EType GLGizmosManager::get_gizmo_from_name(const std::string& gizmo_name) const
 {
-    for (auto &gizmo : m_gizmos)
+    for (size_t idx = 0; idx < m_gizmos.size(); ++idx)
     {
-        std::string filename = gizmo->get_icon_filename();
+        std::string filename = m_gizmos[idx]->get_icon_filename();
         filename = filename.substr(0, filename.find_first_of('.'));
         if (filename == gizmo_name)
-            return gizmo.get();
+            return (GLGizmosManager::EType)idx;
     }
-    return nullptr;
+    return GLGizmosManager::EType::Undefined;
 }
-
 
 bool GLGizmosManager::generate_icons_texture() const
 {
