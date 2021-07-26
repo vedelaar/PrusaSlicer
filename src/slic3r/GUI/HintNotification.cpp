@@ -1,6 +1,7 @@
 #include "HintNotification.hpp"
 #include "ImGuiWrapper.hpp"
 #include "format.hpp"
+#include "I18N.hpp"
 #include "libslic3r/AppConfig.hpp"
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Config.hpp"
@@ -52,41 +53,49 @@ void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
 				dict.emplace(data.first, data.second.data());
 			}
 			
-			//unescape text
+			//unescaping a translating all texts
+			//unescape text1
 			std::string text;
 			unescape_string_cstyle(dict["text"], text);
+			text = _utf8(text);
+			// hypertext
+			std::string hypertext_text;
+			if (dict.find("hypertext") != dict.end())
+				hypertext_text = _utf8(dict["hypertext"]);
 			// follow_text is regular text following the hypertext, could be empty
 			std::string follow_text;
-			if (dict.find("follow_text") != dict.end())
+			if (dict.find("follow_text") != dict.end()) {
 				unescape_string_cstyle(dict["follow_text"], follow_text);
+				follow_text = _utf8(follow_text);
+			}
 
 			// create HintData
 			if (dict.find("hypertext_type") != dict.end()) {
 				//link to internet
 				if(dict["hypertext_type"] == "link") {
 					std::string	hypertext_link = dict["hypertext_link"];
-					HintData	hint_data{ text, dict["hypertext"], follow_text, [hypertext_link]() { wxLaunchDefaultBrowser(hypertext_link); }  };
+					HintData	hint_data{ text, hypertext_text, follow_text, [hypertext_link]() { wxLaunchDefaultBrowser(hypertext_link); }  };
 					m_loaded_hints.emplace_back(hint_data);
 				// highlight settings
 				} else if (dict["hypertext_type"] == "settings") {
 					std::string		opt = dict["hypertext_settings_opt"];
 					Preset::Type	type = static_cast<Preset::Type>(std::atoi(dict["hypertext_settings_type"].c_str()));
 					std::wstring	category = boost::nowide::widen(dict["hypertext_settings_category"]);
-					HintData		hint_data{ text, dict["hypertext"], follow_text, [opt, type, category]() { GUI::wxGetApp().sidebar().jump_to_option(opt, type, category); } };
+					HintData		hint_data{ text, hypertext_text, follow_text, [opt, type, category]() { GUI::wxGetApp().sidebar().jump_to_option(opt, type, category); } };
 					m_loaded_hints.emplace_back(hint_data);
 				// open preferences
 				} else if(dict["hypertext_type"] == "preferences") {
 					int			page = static_cast<Preset::Type>(std::atoi(dict["hypertext_preferences_page"].c_str()));
-					HintData	hint_data{ text, dict["hypertext"], follow_text, [page]() { wxGetApp().open_preferences(page); } };
+					HintData	hint_data{ text, hypertext_text, follow_text, [page]() { wxGetApp().open_preferences(page); } };
 					m_loaded_hints.emplace_back(hint_data);
 
 				} else if (dict["hypertext_type"] == "plater") {
 					std::string	item = dict["hypertext_plater_item"];
-					HintData	hint_data{ text, dict["hypertext"], follow_text, [item]() { GUI::wxGetApp().plater()->canvas3D()->highlight_toolbar_item(item); } };
+					HintData	hint_data{ text, hypertext_text, follow_text, [item]() { GUI::wxGetApp().plater()->canvas3D()->highlight_toolbar_item(item); } };
 					m_loaded_hints.emplace_back(hint_data);
 				} else if (dict["hypertext_type"] == "gizmo") {
 					std::string	item = dict["hypertext_gizmo_item"];
-					HintData	hint_data{ text, dict["hypertext"], follow_text, [item]() { GUI::wxGetApp().plater()->canvas3D()->highlight_gizmo(item); } };
+					HintData	hint_data{ text, hypertext_text, follow_text, [item]() { GUI::wxGetApp().plater()->canvas3D()->highlight_gizmo(item); } };
 					m_loaded_hints.emplace_back(hint_data);
 				}
 			} else {
