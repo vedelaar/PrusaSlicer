@@ -1115,12 +1115,13 @@ GLGizmoBase* GLGizmosManager::get_current() const
 
 GLGizmosManager::EType GLGizmosManager::get_gizmo_from_name(const std::string& gizmo_name) const
 {
-    for (size_t idx = 0; idx < m_gizmos.size(); ++idx)
+    std::vector<size_t> selectable_idxs = get_selectable_idxs();
+    for (size_t idx = 0; idx < selectable_idxs.size(); ++idx)
     {
-        std::string filename = m_gizmos[idx]->get_icon_filename();
+        std::string filename = m_gizmos[selectable_idxs[idx]]->get_icon_filename();
         filename = filename.substr(0, filename.find_first_of('.'));
         if (filename == gizmo_name)
-            return (GLGizmosManager::EType)idx;
+            return (GLGizmosManager::EType)selectable_idxs[idx];
     }
     return GLGizmosManager::EType::Undefined;
 }
