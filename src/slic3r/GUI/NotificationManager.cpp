@@ -1060,6 +1060,78 @@ void NotificationManager::PrintHostUploadNotification::render_cancel_button(ImGu
 	ImGui::PopStyleColor();
 	
 }
+//------SlicingProgressNotificastion
+void NotificationManager::SlicingProgressNotification::init()
+{
+	ProgressBarNotification::init();
+	if (m_state == EState::NotFading && m_percentage >= 1.0f)
+		m_state = EState::Shown;
+}
+void NotificationManager::SlicingProgressNotification::set_percentage(float percent)
+{
+	m_percentage = percent;
+	if (percent >= 1.0f) {
+		m_has_cancel_button = false;
+		m_state = EState::Shown;
+	} else {
+		m_has_cancel_button = true;
+		m_state = EState::NotFading;
+	}
+}
+void NotificationManager::SlicingProgressNotification::render_bar(ImGuiWrapper& imgui,  const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
+{
+	std::string text;
+	ProgressBarNotification::render_bar(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
+	std::stringstream stream;
+	stream << std::fixed << std::setprecision(2) << (int)(m_percentage * 100) << "%";
+	text = stream.str();
+	ImGui::SetCursorPosX(m_left_indentation);
+	ImGui::SetCursorPosY(win_size_y / 2 + win_size_y / 6 - (m_multiline ? 0 : m_line_height / 4));
+	imgui.text(text.c_str());
+}
+void NotificationManager::SlicingProgressNotification::render_cancel_button(ImGuiWrapper& imgui, const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
+{
+	ImVec2 win_size(win_size_x, win_size_y);
+	ImVec2 win_pos(win_pos_x, win_pos_y);
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.0f, .0f, .0f, .0f));
+	push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.0f, .0f, .0f, .0f));
+
+
+	std::string button_text;
+	button_text = ImGui::CancelButton;
+
+	if (ImGui::IsMouseHoveringRect(ImVec2(win_pos.x - win_size.x / 10.f, win_pos.y),
+		ImVec2(win_pos.x, win_pos.y + win_size.y - (m_minimize_b_visible ? 2 * m_line_height : 0)),
+		true))
+	{
+		button_text = ImGui::CancelHoverButton;
+	}
+	ImVec2 button_pic_size = ImGui::CalcTextSize(button_text.c_str());
+	ImVec2 button_size(button_pic_size.x * 1.25f, button_pic_size.y * 1.25f);
+	ImGui::SetCursorPosX(win_size.x - m_line_height * 2.75f);
+	ImGui::SetCursorPosY(win_size.y / 2 - button_size.y);
+	if (imgui.button(button_text.c_str(), button_size.x, button_size.y))
+	{
+		//close();
+	}
+
+	//invisible large button
+	ImGui::SetCursorPosX(win_size.x - m_line_height * 2.35f);
+	ImGui::SetCursorPosY(0);
+	if (imgui.button(" ", m_line_height * 2.125, win_size.y - (m_minimize_b_visible ? 2 * m_line_height : 0)))
+	{
+		//close();
+	}
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+}
+
 //------NotificationManager--------
 NotificationManager::NotificationManager(wxEvtHandler* evt_handler) :
 	m_evt_handler(evt_handler)
@@ -1310,6 +1382,37 @@ void NotificationManager::upload_job_notification_show_error(int id, const std::
 		}
 	}
 }
+
+void NotificationManager::push_slicing_progress_notification(const std::string& event_text, float percentage)
+{
+	// TODO: what to do with multiple progresses?
+	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {
+		if (notification->get_type() == NotificationType::SlicingProgress) {
+			return;
+		}
+	}
+	std::string text = event_text;
+	NotificationData data{ NotificationType::SlicingProgress, NotificationLevel::ProgressBarNotification, 1, text };
+	push_notification_data(std::make_unique<NotificationManager::SlicingProgressNotification>(data, m_id_provider, m_evt_handler, 0), 0);
+	//push_notification_data(std::make_unique<NotificationManager::SlicingProgressNotification>(data, m_id_provider, m_evt_handler, 0), 0);
+}
+void NotificationManager::set_slicing_progress_percentage(const std::string& event_text, float percentage)
+{
+	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {
+		if (notification->get_type() == NotificationType::SlicingProgress) {
+			ProgressBarNotification* spn = dynamic_cast<SlicingProgressNotification*>(notification.get());
+			//if (spn->compare_job_id(id)) {
+				spn->set_percentage(percentage);
+				if(!spn->compare_text(event_text))
+					spn->update({ NotificationType::SlicingProgress, NotificationLevel::ProgressBarNotification, 1, event_text });
+				wxGetApp().plater()->get_current_canvas3D()->schedule_extra_frame(0);
+				break;
+			//}
+		}
+	}
+	push_slicing_progress_notification(event_text, percentage);
+}
+
 void NotificationManager::push_hint_notification()
 {
 	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {

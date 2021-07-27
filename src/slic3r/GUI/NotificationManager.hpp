@@ -71,6 +71,8 @@ enum class NotificationType
 	ProgressBar,
 	// Progress bar with info from Print Host Upload Queue dialog.
 	PrintHostUpload,
+	// Progress bar with cancel button, cannot be closed
+	SlicingProgress,
 	// Notification, when Color Change G-code is empty and user try to add color change on DoubleSlider.
     EmptyColorChangeCode,
     // Notification that custom supports/seams were deleted after mesh repair.
@@ -156,11 +158,15 @@ public:
 	void set_slicing_complete_large(bool large);
 	// Exporting finished, show this information with path, button to open containing folder and if ejectable - eject button
 	void push_exporting_finished_notification(const std::string& path, const std::string& dir_path, bool on_removable);
-	// notification with progress bar
+	// notifications with progress bar
+	// print host upload
 	void push_upload_job_notification(int id, float filesize, const std::string& filename, const std::string& host, float percentage = 0);
 	void set_upload_job_notification_percentage(int id, const std::string& filename, const std::string& host, float percentage);
 	void upload_job_notification_show_canceled(int id, const std::string& filename, const std::string& host);
 	void upload_job_notification_show_error(int id, const std::string& filename, const std::string& host);
+	// slicing progress
+	void push_slicing_progress_notification(const std::string& event_text, float percentage = 0);
+	void set_slicing_progress_percentage(const std::string& event_text, float percentage);
 	// Hint (did you know) notification
 	void push_hint_notification();
 	// Close old notification ExportFinished.
@@ -339,7 +345,7 @@ private:
 	class SlicingCompleteLargeNotification : public PopNotification
 	{
 	public:
-		SlicingCompleteLargeNotification(const NotificationData& n, NotificationIDProvider& id_provider, wxEvtHandler* evt_handler, bool largeds);
+		SlicingCompleteLargeNotification(const NotificationData& n, NotificationIDProvider& id_provider, wxEvtHandler* evt_handler, bool large);
 		void			set_large(bool l);
 		bool			get_large() { return m_is_large; }
 		void			set_print_info(const std::string &info);
@@ -451,6 +457,30 @@ private:
 		UploadJobState	m_uj_state{ UploadJobState::PB_PROGRESS };
 	};
 
+	class SlicingProgressNotification : public ProgressBarNotification
+	{
+	public:
+		SlicingProgressNotification(const NotificationData& n, NotificationIDProvider& id_provider, wxEvtHandler* evt_handler, float percentage) 
+		: ProgressBarNotification(n, id_provider, evt_handler, percentage)
+		{
+			m_has_cancel_button = true;
+		}
+		void				cancel() {};
+		void				set_percentage(float percent) override;
+	protected:
+		void        init() override;
+		void		render_bar(ImGuiWrapper& imgui,
+								const float win_size_x, const float win_size_y,
+								const float win_pos_x, const float win_pos_y) override;
+		void		render_cancel_button(ImGuiWrapper& imgui,
+											const float win_size_x, const float win_size_y,
+											const float win_pos_x, const float win_pos_y) override;
+		// no close button
+		void render_close_button(ImGuiWrapper& imgui,
+									const float win_size_x, const float win_size_y,
+									const float win_pos_x, const float win_pos_y) override {}
+	};
+
 	class ExportFinishedNotification : public PopNotification
 	{
 	public:
@@ -475,7 +505,7 @@ private:
 		void render_close_button(ImGuiWrapper& imgui,
 								 const float win_size_x, const float win_size_y,
 								 const float win_pos_x, const float win_pos_y) override;
-		void         render_eject_button(ImGuiWrapper& imgui,
+		void render_eject_button(ImGuiWrapper& imgui,
 			                             const float win_size_x, const float win_size_y,
 			                             const float win_pos_x, const float win_pos_y);
 		void render_minimize_button(ImGuiWrapper& imgui, const float win_pos_x, const float win_pos_y) override
