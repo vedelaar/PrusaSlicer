@@ -58,6 +58,21 @@ void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
 			std::string text;
 			unescape_string_cstyle(dict["text"], text);
 			text = _utf8(text);
+			// "bold" (different color) text
+			std::string marker_s(1, ImGui::ColorMarkerStart);
+			std::string marker_e(1, ImGui::ColorMarkerEnd);
+			size_t start_pos = text.find("<b>");
+			while (start_pos != std::string::npos) {
+				text.replace(start_pos, 3, marker_s);
+				start_pos = text.find("<b>");
+			}
+			// end bold
+			start_pos = text.find("</b>");
+			while (start_pos != std::string::npos) {
+				text.replace(start_pos, 4, marker_e);
+				start_pos = text.find("</b>");
+			}
+
 			// hypertext
 			std::string hypertext_text;
 			if (dict.find("hypertext") != dict.end())
@@ -67,6 +82,18 @@ void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
 			if (dict.find("follow_text") != dict.end()) {
 				unescape_string_cstyle(dict["follow_text"], follow_text);
 				follow_text = _utf8(follow_text);
+			}
+			// "bold" (different color) text
+			start_pos = follow_text.find("<b>");
+			while (start_pos != std::string::npos) {
+				follow_text.replace(start_pos, 3, marker_s);
+				start_pos = follow_text.find("<b>");
+			}
+			// end bold
+			start_pos = follow_text.find("</b>");
+			while (start_pos != std::string::npos) {
+				follow_text.replace(start_pos, 4, marker_e);
+				start_pos = follow_text.find("</b>");
 			}
 
 			// create HintData
@@ -352,6 +379,11 @@ void NotificationManager::HintNotification::render_text(ImGuiWrapper& imgui, con
 				// regural line
 				line = m_text1.substr(last_end, m_endlines[i] - last_end);	
 			}
+			// first line is headline
+			if (i == 0) {
+				line = ImGui::ColorMarkerStart + line + ImGui::ColorMarkerEnd;
+			}
+
 			last_end = m_endlines[i];
 			if (m_text1.size() > m_endlines[i])
 				last_end += (m_text1[m_endlines[i]] == '\n' || m_text1[m_endlines[i]] == ' ' ? 1 : 0);
