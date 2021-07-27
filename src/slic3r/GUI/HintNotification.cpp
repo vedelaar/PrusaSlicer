@@ -277,9 +277,6 @@ void NotificationManager::HintNotification::count_lines()
 						next_space = text.length();
 					}
 					// when one word longer than line.
-					//if (ImGui::CalcTextSize(text.substr(last_end, next_space - last_end).c_str()).x > m_window_width - m_window_width_offset) {
-					auto w = ImGui::CalcTextSize(text.substr(last_end, next_space - last_end).c_str()).x + size_of_last_line;
-					auto opo = (m_window_width - m_window_width_offset) / 4 * 3;
 					if (ImGui::CalcTextSize(text.substr(last_end, next_space - last_end).c_str()).x > m_window_width - m_window_width_offset - size_of_last_line ||
 						ImGui::CalcTextSize(text.substr(last_end, next_space - last_end).c_str()).x + size_of_last_line < (m_window_width - m_window_width_offset) / 4 * 3
 						) {
