@@ -454,19 +454,26 @@ private:
 		// Size of uploaded size to be displayed in MB
 		float			    m_file_size;
 		long				m_hover_time{ 0 };
-		UploadJobState	m_uj_state{ UploadJobState::PB_PROGRESS };
+		UploadJobState		m_uj_state{ UploadJobState::PB_PROGRESS };
 	};
 
 	class SlicingProgressNotification : public ProgressBarNotification
 	{
 	public:
+		enum class SlicingProgressState
+		{
+			SP_PROGRESS,
+			SP_CANCELLED,
+			SP_COMPLETED
+		};
 		SlicingProgressNotification(const NotificationData& n, NotificationIDProvider& id_provider, wxEvtHandler* evt_handler, float percentage) 
 		: ProgressBarNotification(n, id_provider, evt_handler, percentage)
 		{
 			m_has_cancel_button = true;
 		}
-		void				cancel() {};
+		void				cancel();
 		void				set_percentage(float percent) override;
+		void			    set_cancel_callback(std::function<void()> callback) { m_cancel_callback = callback; }
 	protected:
 		void        init() override;
 		void		render_bar(ImGuiWrapper& imgui,
@@ -476,9 +483,13 @@ private:
 											const float win_size_x, const float win_size_y,
 											const float win_pos_x, const float win_pos_y) override;
 		// no close button
-		void render_close_button(ImGuiWrapper& imgui,
+		void		render_close_button(ImGuiWrapper& imgui,
 									const float win_size_x, const float win_size_y,
 									const float win_pos_x, const float win_pos_y) override {}
+		void       on_cancel_button();
+		std::function<void()>	m_cancel_callback;
+		SlicingProgressState	m_sp_state { SlicingProgressState::SP_PROGRESS };
+		
 	};
 
 	class ExportFinishedNotification : public PopNotification

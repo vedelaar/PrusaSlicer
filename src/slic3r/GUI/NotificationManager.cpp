@@ -1078,6 +1078,17 @@ void NotificationManager::SlicingProgressNotification::set_percentage(float perc
 		m_state = EState::NotFading;
 	}
 }
+void NotificationManager::SlicingProgressNotification::cancel()
+{
+
+}
+void NotificationManager::SlicingProgressNotification::on_cancel_button()
+{
+	cancel();
+	if (m_cancel_callback){
+		m_cancel_callback();
+	}
+}
 void NotificationManager::SlicingProgressNotification::render_bar(ImGuiWrapper& imgui,  const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
 {
 	std::string text;
