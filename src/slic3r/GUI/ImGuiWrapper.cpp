@@ -36,7 +36,7 @@ namespace Slic3r {
 namespace GUI {
 
 
-static const std::map<const char, std::string> font_icons = {
+static const std::map<const wchar_t, std::string> font_icons = {
     {ImGui::PrintIconMarker       , "cog"                           },
     {ImGui::PrinterIconMarker     , "printer"                       },
     {ImGui::PrinterSlaIconMarker  , "sla_printer"                   },
@@ -49,20 +49,22 @@ static const std::map<const char, std::string> font_icons = {
     {ImGui::PreferencesButton      , "notification_preferences"      },
     {ImGui::PreferencesHoverButton , "notification_preferences_hover"},
 };
-static const std::map<const char, std::string> font_icons_large = {
-    {ImGui::CloseNotifButton       , "notification_close"            },
-    {ImGui::CloseNotifHoverButton  , "notification_close_hover"      },
-    {ImGui::EjectButton            , "notification_eject_sd"         },
-    {ImGui::EjectHoverButton       , "notification_eject_sd_hover"   },
-    {ImGui::WarningMarker          , "notification_warning"          },
-    {ImGui::ErrorMarker            , "notification_error"            },
-    {ImGui::CancelButton           , "notification_cancel"           },
-    {ImGui::CancelHoverButton      , "notification_cancel_hover"     },
-    {ImGui::SinkingObjectMarker    , "move"                          },
-    {ImGui::CustomSupportsMarker   , "fdm_supports"                  },
-    {ImGui::CustomSeamMarker       , "seam"                          },
-    {ImGui::MmuSegmentationMarker  , "move"                          },
-    {ImGui::VarLayerHeightMarker   , "layers"                        },
+static const std::map<const wchar_t, std::string> font_icons_large = {
+    {ImGui::CloseNotifButton        , "notification_close"              },
+    {ImGui::CloseNotifHoverButton   , "notification_close_hover"        },
+    {ImGui::EjectButton             , "notification_eject_sd"           },
+    {ImGui::EjectHoverButton        , "notification_eject_sd_hover"     },
+    {ImGui::WarningMarker           , "notification_warning"            },
+    {ImGui::ErrorMarker             , "notification_error"              },
+    {ImGui::CancelButton            , "notification_cancel"             },
+    {ImGui::CancelHoverButton       , "notification_cancel_hover"       },
+    {ImGui::SinkingObjectMarker     , "move"                            },
+    {ImGui::CustomSupportsMarker    , "fdm_supports"                    },
+    {ImGui::CustomSeamMarker        , "seam"                            },
+    {ImGui::MmuSegmentationMarker   , "move"                            },
+    {ImGui::VarLayerHeightMarker    , "layers"                          },
+    {ImGui::DocumentationButton     , "notification_documentation"      },
+    {ImGui::DocumentationHoverButton, "notification_documentation_hover"},
     
 };
 

@@ -97,6 +97,7 @@ void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
 			std::string hypertext_text;
 			std::string follow_text;
 			std::string disabled_modes;
+			std::string documentation_link;
 			unescape_string_cstyle(_utf8(dict["text"]), fulltext);
 			// replace <b> and </b> for imgui markers
 			std::string marker_s(1, ImGui::ColorMarkerStart);
@@ -146,38 +147,41 @@ void HintDatabase::load_hints_from_file(const boost::filesystem::path& path)
 			if (dict.find("disabled_modes") != dict.end()) {
 				disabled_modes = dict["disabled_modes"];
 			}
+			if (dict.find("documentation_link") != dict.end()) {
+				documentation_link = dict["documentation_link"];
+			}
 
 			// create HintData
 			if (dict.find("hypertext_type") != dict.end()) {
 				//link to internet
 				if(dict["hypertext_type"] == "link") {
 					std::string	hypertext_link = dict["hypertext_link"];
-					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, false, [hypertext_link]() { wxLaunchDefaultBrowser(hypertext_link); }  };
+					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, false, documentation_link, [hypertext_link]() { wxLaunchDefaultBrowser(hypertext_link); }  };
 					m_loaded_hints.emplace_back(hint_data);
 				// highlight settings
 				} else if (dict["hypertext_type"] == "settings") {
 					std::string		opt = dict["hypertext_settings_opt"];
 					Preset::Type	type = static_cast<Preset::Type>(std::atoi(dict["hypertext_settings_type"].c_str()));
 					std::wstring	category = boost::nowide::widen(dict["hypertext_settings_category"]);
-					HintData		hint_data{ text1, hypertext_text, follow_text, disabled_modes, true, [opt, type, category]() { GUI::wxGetApp().sidebar().jump_to_option(opt, type, category); } };
+					HintData		hint_data{ text1, hypertext_text, follow_text, disabled_modes, true, documentation_link, [opt, type, category]() { GUI::wxGetApp().sidebar().jump_to_option(opt, type, category); } };
 					m_loaded_hints.emplace_back(hint_data);
 				// open preferences
 				} else if(dict["hypertext_type"] == "preferences") {
 					int			page = static_cast<Preset::Type>(std::atoi(dict["hypertext_preferences_page"].c_str()));
-					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, false, [page]() { wxGetApp().open_preferences(page); } };
+					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, false, documentation_link, [page]() { wxGetApp().open_preferences(page); } };
 					m_loaded_hints.emplace_back(hint_data);
 
 				} else if (dict["hypertext_type"] == "plater") {
 					std::string	item = dict["hypertext_plater_item"];
-					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, true, [item]() { wxGetApp().plater()->canvas3D()->highlight_toolbar_item(item); } };
+					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, true, documentation_link, [item]() { wxGetApp().plater()->canvas3D()->highlight_toolbar_item(item); } };
 					m_loaded_hints.emplace_back(hint_data);
 				} else if (dict["hypertext_type"] == "gizmo") {
 					std::string	item = dict["hypertext_gizmo_item"];
-					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, true, [item]() { wxGetApp().plater()->canvas3D()->highlight_gizmo(item); } };
+					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, true, documentation_link, [item]() { wxGetApp().plater()->canvas3D()->highlight_gizmo(item); } };
 					m_loaded_hints.emplace_back(hint_data);
 				}
 				else if (dict["hypertext_type"] == "gallery") {
-					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, false, []() {  wxGetApp().obj_list()->load_shape_object_from_gallery(); } };
+					HintData	hint_data{ text1, hypertext_text, follow_text, disabled_modes, false, documentation_link, []() {  wxGetApp().obj_list()->load_shape_object_from_gallery(); } };
 					m_loaded_hints.emplace_back(hint_data);
 				}
 			} else {
@@ -225,7 +229,11 @@ void NotificationManager::HintNotification::count_spaces()
 	// no left button picture
 	//m_left_indentation = m_line_height;
 
-	m_window_width_offset = m_left_indentation + m_line_height * 3.f;// 5.5f; // no right arrow
+	if (m_documentation_link.empty())
+		m_window_width_offset = m_left_indentation + m_line_height * 3.f;
+	else 
+		m_window_width_offset = m_left_indentation + m_line_height * 5.5f;
+
 	m_window_width = m_line_height * 25;
 }
 
@@ -534,6 +542,11 @@ void NotificationManager::HintNotification::render_close_button(ImGuiWrapper& im
 	render_right_arrow_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
 	render_logo(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
 	render_preferences_button(imgui, win_pos_x, win_pos_y);
+	if (!m_documentation_link.empty())
+	{
+		render_documentation_button(imgui, win_size_x, win_size_y, win_pos_x, win_pos_y);
+	}
+	
 }
 
 void NotificationManager::HintNotification::render_preferences_button(ImGuiWrapper& imgui, const float win_pos_x, const float win_pos_y)
@@ -576,7 +589,6 @@ void NotificationManager::HintNotification::render_preferences_button(ImGuiWrapp
 	// preferences button is in place of minimize button
 	m_minimize_b_visible = true;	
 }
-
 void NotificationManager::HintNotification::render_right_arrow_button(ImGuiWrapper& imgui, const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
 {
 	// Used for debuging
@@ -639,6 +651,74 @@ void NotificationManager::HintNotification::render_logo(ImGuiWrapper& imgui, con
 	ImGui::PopStyleColor();
 	ImGui::PopStyleColor();
 }
+void NotificationManager::HintNotification::render_documentation_button(ImGuiWrapper& imgui, const float win_size_x, const float win_size_y, const float win_pos_x, const float win_pos_y)
+{
+	ImVec2 win_size(win_size_x, win_size_y);
+	ImVec2 win_pos(win_pos_x, win_pos_y);
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.0f, .0f, .0f, .0f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.0f, .0f, .0f, .0f));
+	push_style_color(ImGuiCol_Text, ImVec4(1.f, 1.f, 1.f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	push_style_color(ImGuiCol_TextSelectedBg, ImVec4(0, .75f, .75f, 1.f), m_state == EState::FadingOut, m_current_fade_opacity);
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.0f, .0f, .0f, .0f));
+
+	std::wstring button_text;
+	button_text = ImGui::DocumentationButton;
+	std::string placeholder_text;
+	placeholder_text = ImGui::EjectButton;
+
+	if (ImGui::IsMouseHoveringRect(ImVec2(win_pos.x - m_line_height * 5.f, win_pos.y),
+		ImVec2(win_pos.x - m_line_height * 2.5f, win_pos.y + win_size.y - 2 * m_line_height),
+		true))
+	{
+		button_text = ImGui::DocumentationHoverButton;
+		// tooltip
+		
+		long time_now = wxGetLocalTime();
+		if (m_hover_time > 0 && m_hover_time < time_now) {
+			ImGui::PushStyleColor(ImGuiCol_PopupBg, ImGuiWrapper::COL_WINDOW_BACKGROUND);
+			ImGui::BeginTooltip();
+			imgui.text(_u8L("Open Documentation in web browser"));
+			ImGui::EndTooltip();
+			ImGui::PopStyleColor();
+		}
+		if (m_hover_time == 0)
+			m_hover_time = time_now;
+		
+	}
+	else
+		m_hover_time = 0;
+
+	ImVec2 button_pic_size = ImGui::CalcTextSize(placeholder_text.c_str());
+	ImVec2 button_size(button_pic_size.x * 1.25f, button_pic_size.y * 1.25f);
+	ImGui::SetCursorPosX(win_size.x - m_line_height * 5.0f);
+	ImGui::SetCursorPosY(win_size.y / 2 - button_size.y);
+	if (imgui.button(button_text.c_str(), button_size.x, button_size.y))
+	{
+		open_documentation();
+	}
+
+	//invisible large button
+	ImGui::SetCursorPosX(win_size.x - m_line_height * 4.625f);
+	ImGui::SetCursorPosY(0);
+	if (imgui.button("  ", m_line_height * 2.f, win_size.y - 2 * m_line_height))
+	{
+		open_documentation();
+	}
+
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleColor();
+}
+
+void NotificationManager::HintNotification::open_documentation()
+{
+	if (!m_documentation_link.empty())
+	{
+		wxLaunchDefaultBrowser(m_documentation_link);
+	}
+}
 void NotificationManager::HintNotification::retrieve_data(size_t recursion_counter)
 {
     HintData* hint_data = HintDatabase::get_instance().get_hint(true);
@@ -665,6 +745,7 @@ void NotificationManager::HintNotification::retrieve_data(size_t recursion_count
 		m_hypertext_callback = hint_data->callback;
 		m_disabled_modes = hint_data->disabled_modes;
 		m_runtime_disable = hint_data->runtime_disable;
+		m_documentation_link = hint_data->documentation_link;
         m_has_hint_data = true;
 		
     }
