@@ -425,8 +425,8 @@ void NotificationManager::HintNotification::render_text(ImGuiWrapper& imgui, con
 				// regural line
 				line = m_text1.substr(last_end, m_endlines[i] - last_end);	
 			}
-			// first line is headline
-			if (i == 0) {
+			// first line is headline (for hint notification it must be divided by \n)
+			if (m_text1.find('\n') >= m_endlines[i]) {
 				line = ImGui::ColorMarkerStart + line + ImGui::ColorMarkerEnd;
 			}
 			// Add ImGui::ColorMarkerStart if there is ImGui::ColorMarkerEnd first (start was at prev line)
