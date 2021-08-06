@@ -1,4 +1,4 @@
-name: C/C++ debug windows x64
+name: Build for Windows
 
 on:
   workflow_dispatch
