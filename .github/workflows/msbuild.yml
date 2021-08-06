@@ -11,7 +11,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
       with:
-        ref: 'Nigthly'
+        ref: 'master'
     - uses: ilammy/msvc-dev-cmd@v1
     - name: mkdir in deps
       run: mkdir deps/build
