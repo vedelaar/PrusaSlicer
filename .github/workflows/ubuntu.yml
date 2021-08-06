@@ -1,7 +1,10 @@
 name: Build for Ubuntu
 
 on:
-  workflow_dispatch
+  workflow_dispatch:
+  push:
+    branches:
+      - Master
 
 jobs:
   build:
