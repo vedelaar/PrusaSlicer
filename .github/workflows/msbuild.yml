@@ -3,6 +3,7 @@ name: C/C++ debug windows x64
 on:
   workflow_dispatch
 
+
 jobs:
   build_dep:
     runs-on: windows-latest
@@ -10,7 +11,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
       with:
-        ref: 'debug_win'
+        ref: 'Nigthly'
     - uses: ilammy/msvc-dev-cmd@v1
     - name: mkdir in deps
       run: mkdir deps/build
@@ -56,10 +57,13 @@ jobs:
       run: cmake .. -G "Visual Studio 16 2019" -A x64 -DCMAKE_PREFIX_PATH="d:\a\SuperSlicer\SuperSlicer\deps\destdir\usr\local"
     - name: make
       working-directory: ./build
-      run: msbuild /m /P:Configuration=Debug INSTALL.vcxproj
+      run: msbuild /m /P:Configuration=Release INSTALL.vcxproj
     - name: make .mo
       working-directory: ./build
-      run: msbuild /m /P:Configuration=Debug gettext_po_to_mo.vcxproj
+      run: msbuild /m /P:Configuration=Release gettext_po_to_mo.vcxproj
+    - name: make .pot
+      working-directory: ./build
+      run: msbuild /m /P:Configuration=Release gettext_make_pot.vcxproj
     - name: create directory and copy into it
       working-directory: ./build
       run: ls
@@ -102,5 +106,5 @@ jobs:
     - name: Upload artifact
       uses: actions/upload-artifact@v1.0.0
       with:
-        name: nightly_win64_debug
+        name: nightly_win64
         path: build/package/
