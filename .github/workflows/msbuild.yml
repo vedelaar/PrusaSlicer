@@ -52,6 +52,8 @@ jobs:
       run: dir deps/destdir
     - name: mkdir
       run: mkdir build
+    - name: adev_dir
+      run: dir d:\a\
     - name: cmake
       working-directory: ./build
       run: cmake .. -G "Visual Studio 16 2019" -A x64 -DCMAKE_PREFIX_PATH="d:\a\SuperSlicer\SuperSlicer\deps\destdir\usr\local"
