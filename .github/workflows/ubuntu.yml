@@ -1,0 +1,72 @@
+name: Build for Ubuntu
+
+on:
+  workflow_dispatch
+
+jobs:
+  build:
+
+    runs-on: ubuntu-20.04
+    
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        ref: 'master'
+    - name: update submodule profiles
+      working-directory: ./resources/profiles
+      run: git submodule update --init
+    - name: change date in version
+      run: sed -i "s/+UNKNOWN/_$(date '+%F')/" version.inc
+    - name: update clock
+      run: sudo hwclock -s
+    - name: update apt
+      run: sudo apt update
+    - name: install gtk2 glew
+      run: sudo apt install libgtk2.0-dev libglew-dev libudev-dev libdbus-1-dev
+    - name: mkdir in deps
+      run: mkdir deps/build
+    - name: cmake deps
+      working-directory: ./deps/build
+      run: cmake ..
+    - name: make deps
+      working-directory: ./deps/build
+      run: make -j2
+    - name: rename wxscintilla
+      working-directory: ./deps/build/destdir/usr/local/lib
+      run: cp libwxscintilla-3.1.a libwx_gtk2u_scintilla-3.1.a
+    - name: ls libs
+      working-directory: ./deps/build
+      run: ls ./destdir/usr/local/lib
+    - name: clean deps
+      working-directory: ./deps/build
+      run: rm -rf dep_*
+    - name: mkdir build
+      run: mkdir build
+    - name: cmake
+      working-directory: ./build
+      run: cmake .. -DCMAKE_PREFIX_PATH="/home/runner/work/PrusaSlicer/PrusaSlicer/deps/build/destdir/usr/local" -DSLIC3R_STATIC=1
+    - name: make SuperSlicer
+      working-directory: ./build
+      run: make -j2
+    - name: create directory and copy into it
+      working-directory: ./build
+      run: |
+        mkdir package
+        mkdir package/bin
+    - name: copy resources
+      working-directory: ./build
+      run: cp -Rf ../resources package/resources
+    - name: copy bin
+      working-directory: ./build
+      run: cp -f src/prusa-slicer package/bin/prusa-slicer
+    - name: create sh from echo
+      working-directory: ./build/package
+      run: |
+        echo -e '#!/bin/bash\nDIR=$(readlink -f "$0" | xargs dirname)\nexport LD_LIBRARY_PATH="$DIR/bin"\nexec "$DIR/bin/prusa-slicer" "$@"' >prusa-slicer
+        chmod u+x prusa-slicer
+        tar -cvf ../prusa-slicer.tar .
+    - name: Upload artifact
+      uses: actions/upload-artifact@v1.0.0
+      with:
+        name: nightly_linux.tar
+        path: build/prusa-slicer.tar
