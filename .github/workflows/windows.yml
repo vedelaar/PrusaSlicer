@@ -1,7 +1,10 @@
 name: Build for Windows
 
 on:
-  workflow_dispatch
+  workflow_dispatch:
+  push:
+    branches:
+      - Master
 
 
 jobs:
