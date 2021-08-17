@@ -127,7 +127,7 @@ static void add_msg_content(wxWindow* parent, wxBoxSizer* content_sizer, wxStrin
     else {
         wxClientDC dc(parent);
         wxSize msg_sz = dc.GetMultiLineTextExtent(msg);
-        page_size = wxSize(std::min(msg_sz.GetX() + em,     68 * em),
+        page_size = wxSize(std::min(msg_sz.GetX() + 2 * em, 68 * em),
                            std::min(msg_sz.GetY() + 2 * em, 68 * em));
     }
     html->SetMinSize(page_size);
@@ -202,7 +202,7 @@ MessageDialog::MessageDialog(wxWindow* parent,
     if (style & wxCANCEL)   add_btn(wxID_CANCEL);
 
     logo->SetBitmap(create_scaled_bitmap(style & wxICON_WARNING     ? "exclamation" : 
-                                         style & wxICON_INFORMATION ? "info.png"    : 
+                                         style & wxICON_INFORMATION ? "info"        :
                                          style & wxICON_QUESTION    ? "question"    : "PrusaSlicer_192px_grayscale.png", this, 84));
 
     wxGetApp().UpdateDlgDarkUI(this);
@@ -210,6 +210,58 @@ MessageDialog::MessageDialog(wxWindow* parent,
     this->CenterOnParent();
 }
 #endif
+
+
+// InfoDialog
+
+InfoDialog::InfoDialog(wxWindow* parent, const wxString &title, const wxString& msg)
+	: MsgDialog(parent, wxString::Format(_L("%s information"), SLIC3R_APP_NAME), title)
+	, msg(msg)
+{
+	this->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+
+	// Text shown as HTML, so that mouse selection and Ctrl-V to copy will work.
+	wxHtmlWindow* html = new wxHtmlWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxHW_SCROLLBAR_AUTO);
+	{
+		wxFont 	  	font = wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
+		wxFont      monospace = wxGetApp().code_font();
+		wxColour  	text_clr = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+		wxColour  	bgr_clr = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
+		auto      	text_clr_str = wxString::Format(wxT("#%02X%02X%02X"), text_clr.Red(), text_clr.Green(), text_clr.Blue());
+		auto      	bgr_clr_str = wxString::Format(wxT("#%02X%02X%02X"), bgr_clr.Red(), bgr_clr.Green(), bgr_clr.Blue());
+		const int 	font_size = font.GetPointSize() - 1;
+		int 		size[] = { font_size, font_size, font_size, font_size, font_size, font_size, font_size };
+		html->SetFonts(font.GetFaceName(), monospace.GetFaceName(), size);
+		html->SetBorders(2);
+
+		// calculate html page size from text
+		int lines = msg.Freq('\n');
+
+		if (msg.Contains("<tr>")) {
+			int pos = 0;
+			while (pos < (int)msg.Len() && pos != wxNOT_FOUND) {
+				pos = msg.find("<tr>", pos + 1);
+				lines+=2;
+			}
+		}
+		int page_height = std::min((font.GetPixelSize().y + 1) * lines, 68 * wxGetApp().em_unit());
+		wxSize page_size(68 * wxGetApp().em_unit(), page_height);
+
+		html->SetMinSize(page_size);
+
+		std::string msg_escaped = xml_escape(msg.ToUTF8().data(), true);
+		boost::replace_all(msg_escaped, "\r\n", "<br>");
+		boost::replace_all(msg_escaped, "\n", "<br>");
+		html->SetPage("<html><body bgcolor=\"" + bgr_clr_str + "\"><font color=\"" + text_clr_str + "\">" + wxString::FromUTF8(msg_escaped.data()) + "</font></body></html>");
+		content_sizer->Add(html, 1, wxEXPAND);
+	}
+
+	// Set info bitmap
+	logo->SetBitmap(create_scaled_bitmap("info", this, 84));
+
+	Fit();
+}
+
 
 }
 }
