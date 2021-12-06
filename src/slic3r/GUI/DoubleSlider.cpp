@@ -1,5 +1,6 @@
 #include "libslic3r/libslic3r.h"
 #include "DoubleSlider.hpp"
+#include "DoubleSlider_Utils.hpp"
 #include "libslic3r/GCode.hpp"
 #include "GUI.hpp"
 #include "GUI_App.hpp"
@@ -25,6 +26,7 @@
 
 #include <cmath>
 #include <boost/algorithm/string/replace.hpp>
+#include <boost/algorithm/string/split.hpp>
 #include <random>
 #include "Field.hpp"
 #include "format.hpp"
@@ -37,6 +39,14 @@ using GUI::into_u8;
 using GUI::format_wxstr;
 
 namespace DoubleSlider {
+
+constexpr double min_delta_area = scale_(scale_(25));  // equal to 25 mm2
+constexpr double miscalculation = scale_(scale_(1));   // equal to 1 mm2
+
+bool equivalent_areas(const double& bottom_area, const double& top_area)
+{
+    return fabs(bottom_area - top_area) <= miscalculation;
+}
 
 wxDEFINE_EVENT(wxCUSTOMEVT_TICKSCHANGED, wxEvent);
 
@@ -1397,8 +1407,8 @@ wxString Control::get_tooltip(int tick/*=-1*/)
     if (tick_code_it == m_ticks.ticks.end() && m_focus == fiActionIcon)    // tick doesn't exist
     {
         if (m_draw_mode == dmSequentialFffPrint)
-            return   _L("The sequential print is on.\n"
-                        "It's impossible to apply any custom G-code for objects printing sequentually.\n");
+            return  (_L("The sequential print is on.\n"
+                        "It's impossible to apply any custom G-code for objects printing sequentually.") + "\n");
 
         // Show mode as a first string of tooltop
         tooltip = "    " + _L("Print mode") + ": ";
@@ -1437,6 +1447,18 @@ wxString Control::get_tooltip(int tick/*=-1*/)
         std::string space = "   ";
         tooltip = space;
         auto format_gcode = [space](std::string gcode) {
+            // when the tooltip is too long, it starts to flicker, see: https://github.com/prusa3d/PrusaSlicer/issues/7368
+            // so we limit the number of lines shown
+            std::vector<std::string> lines;
+            boost::split(lines, gcode, boost::is_any_of("\n"), boost::token_compress_off);
+            static const size_t MAX_LINES = 10;
+            if (lines.size() > MAX_LINES) {
+                gcode = lines.front() + '\n';
+                for (size_t i = 1; i < MAX_LINES; ++i) {
+                    gcode += lines[i] + '\n';
+                }
+                gcode += "[" + into_u8(_L("continue")) + "]\n";
+            }
             boost::replace_all(gcode, "\n", "\n" + space);
             return gcode;
         };
@@ -1556,10 +1578,8 @@ void Control::OnMotion(wxMouseEvent& event)
     event.Skip();
 
     // Set tooltips with information for each icon
-#if ENABLE_FIX_IMPORTING_COLOR_PRINT_VIEW_INTO_GCODEVIEWER
     if (GUI::wxGetApp().is_editor())
-#endif // ENABLE_FIX_IMPORTING_COLOR_PRINT_VIEW_INTO_GCODEVIEWER
-    this->SetToolTip(get_tooltip(tick));
+        this->SetToolTip(get_tooltip(tick));
 
     if (action) {
         wxCommandEvent e(wxEVT_SCROLL_CHANGED);
@@ -1821,7 +1841,8 @@ void Control::OnChar(wxKeyEvent& event)
 
 void Control::OnRightDown(wxMouseEvent& event)
 {
-    if (HasCapture()) return;
+    if (HasCapture() || m_is_left_down)
+        return;
     this->CaptureMouse();
 
     const wxPoint pos = event.GetLogicalPosition(wxClientDC(this));
@@ -2028,11 +2049,37 @@ void Control::show_cog_icon_context_menu()
         append_menu_item(&menu, wxID_ANY, _L("Set extruder sequence for the entire print"), "",
             [this](wxCommandEvent&) { edit_extruder_sequence(); }, "", &menu);
 
-    if (m_mode != MultiExtruder && m_draw_mode == dmRegular)
+    if (GUI::wxGetApp().is_editor() && m_mode != MultiExtruder && m_draw_mode == dmRegular)
         append_menu_item(&menu, wxID_ANY, _L("Set auto color changes"), "",
             [this](wxCommandEvent&) { auto_color_change(); }, "", &menu);
 
     GUI::wxGetApp().plater()->PopupMenu(&menu);
+}
+
+bool check_color_change(PrintObject* object, size_t frst_layer_id, size_t layers_cnt, bool check_overhangs, std::function<bool(Layer*)> break_condition)
+{
+    double prev_area = area(object->get_layer(frst_layer_id)->lslices);
+
+    bool detected = false;
+    for (size_t i = frst_layer_id+1; i < layers_cnt; i++) {
+        Layer* layer = object->get_layer(i);
+        double cur_area = area(layer->lslices);
+
+        // check for overhangs
+        if (check_overhangs && cur_area > prev_area && !equivalent_areas(prev_area, cur_area))
+            break;
+
+        // Check percent of the area decrease.
+        // This value have to be more than min_delta_area and more then 10%
+        if ((prev_area - cur_area > min_delta_area) && (cur_area / prev_area < 0.9)) {
+            detected = true;
+            if (break_condition(layer))
+                break;
+        }
+
+        prev_area = cur_area;
+    }
+    return detected;
 }
 
 void Control::auto_color_change()
@@ -2047,48 +2094,36 @@ void Control::auto_color_change()
     }
 
     int extruders_cnt = GUI::wxGetApp().extruders_edited_cnt();
-    int extruder = 2;
+//    int extruder = 2;
 
     const Print& print = GUI::wxGetApp().plater()->fff_print();  
-    double delta_area = scale_(scale_(25)); // equal to 25 mm2
-
     for (auto object : print.objects()) {
         if (object->layer_count() == 0)
             continue;
-        double prev_area = area(object->get_layer(0)->lslices);
 
-        for (size_t i = 1; i < object->layers().size(); i++) {
-            Layer* layer = object->get_layer(i);
-            double cur_area = area(layer->lslices);
-
-            if (cur_area > prev_area && prev_area - cur_area > scale_(scale_(1)))
-                break;
-
-            if (prev_area - cur_area > delta_area) {
-                // Check percent of the area decrease. 
-                // Ignore it, if this value is less than 10% 
-                if (cur_area / prev_area > 0.9)
-                    continue;
-                int tick = get_tick_from_value(layer->print_z);
-                if (tick >= 0 && !m_ticks.has_tick(tick)) {
-                    if (m_mode == SingleExtruder) {
-                        m_ticks.set_default_colors(true);
-                        m_ticks.add_tick(tick, ColorChange, 1, layer->print_z);
-                    }
-                    else {
-                        m_ticks.add_tick(tick, ToolChange, extruder, layer->print_z);
-                        if (++extruder > extruders_cnt)
+        check_color_change(object, 1, object->layers().size(), false, [this, extruders_cnt](Layer* layer)
+        {
+            int tick = get_tick_from_value(layer->print_z);
+            if (tick >= 0 && !m_ticks.has_tick(tick)) {
+                if (m_mode == SingleExtruder) {
+                    m_ticks.set_default_colors(true);
+                    m_ticks.add_tick(tick, ColorChange, 1, layer->print_z);
+                }
+                else {
+                    int extruder = 2;
+                    if (!m_ticks.empty()) {
+                        auto it = m_ticks.ticks.end();
+                        it--;
+                        extruder = it->extruder + 1;
+                        if (extruder > extruders_cnt)
                             extruder = 1;
                     }
+                    m_ticks.add_tick(tick, ToolChange, extruder, layer->print_z);
                 }
-
-                // allow max 3 auto color changes
-                if (m_ticks.ticks.size() == 3)
-                    break;
             }
-
-            prev_area = cur_area;
-        }
+            // allow max 3 auto color changes
+            return m_ticks.ticks.size() > 2;
+        });
     }
 
     if (m_ticks.empty())
@@ -2099,7 +2134,7 @@ void Control::auto_color_change()
 
 void Control::OnRightUp(wxMouseEvent& event)
 {
-    if (!HasCapture())
+    if (!HasCapture() || m_is_left_down)
         return;
     this->ReleaseMouse();
     m_is_right_down = m_is_one_layer = false;
@@ -2525,12 +2560,70 @@ bool Control::check_ticks_changed_event(Type type)
 std::string TickCodeInfo::get_color_for_tick(TickCode tick, Type type, const int extruder)
 {
     if (mode == SingleExtruder && type == ColorChange && m_use_default_colors) {
+#if 1
+        if (ticks.empty())
+            return get_opposite_color((*m_colors)[0]);
+        
+        auto before_tick_it = std::lower_bound(ticks.begin(), ticks.end(), tick);
+        if (before_tick_it == ticks.end()) 
+        {
+            while (before_tick_it != ticks.begin())
+                if (--before_tick_it; before_tick_it->type == ColorChange)
+                    break;
+            if (before_tick_it->type == ColorChange)
+                return get_opposite_color(before_tick_it->color);
+            return get_opposite_color((*m_colors)[0]);
+        }
+
+        if (before_tick_it == ticks.begin())
+        {
+            const std::string& frst_color = (*m_colors)[0];
+            if (before_tick_it->type == ColorChange)
+                return get_opposite_color(frst_color, before_tick_it->color);
+
+            auto next_tick_it = before_tick_it;
+            while (next_tick_it != ticks.end())
+                if (++next_tick_it; next_tick_it->type == ColorChange)
+                    break;
+            if (next_tick_it->type == ColorChange)
+                return get_opposite_color(frst_color, next_tick_it->color);
+
+            return get_opposite_color(frst_color);
+        }
+
+        std::string frst_color = "";
+        if (before_tick_it->type == ColorChange)
+            frst_color = before_tick_it->color;
+        else {
+            auto next_tick_it = before_tick_it;
+            while (next_tick_it != ticks.end())
+                if (++next_tick_it; next_tick_it->type == ColorChange) {
+                    frst_color = next_tick_it->color;
+                    break;
+                }
+        }
+
+        while (before_tick_it != ticks.begin())
+            if (--before_tick_it; before_tick_it->type == ColorChange)
+                break;
+
+        if (before_tick_it->type == ColorChange) {
+            if (frst_color.empty())
+                return get_opposite_color(before_tick_it->color);
+            return get_opposite_color(before_tick_it->color, frst_color);
+        }
+
+        if (frst_color.empty())
+            return get_opposite_color((*m_colors)[0]);
+        return get_opposite_color((*m_colors)[0], frst_color);
+#else
         const std::vector<std::string>& colors = ColorPrintColors::get();
         if (ticks.empty())
             return colors[0];
         m_default_color_idx++;
 
         return colors[m_default_color_idx % colors.size()];
+#endif
     }
 
     std::string color = (*m_colors)[extruder - 1];

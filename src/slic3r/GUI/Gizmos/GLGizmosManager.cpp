@@ -22,6 +22,7 @@
 #include "slic3r/GUI/Gizmos/GLGizmoMmuSegmentation.hpp"
 #include "slic3r/GUI/Gizmos/GLGizmoSimplify.hpp"
 
+#include "libslic3r/format.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/PresetBundle.hpp"
 
@@ -50,8 +51,6 @@ std::vector<size_t> GLGizmosManager::get_selectable_idxs() const
             out.push_back(i);
     return out;
 }
-
-
 
 size_t GLGizmosManager::get_gizmo_idx_from_mouse(const Vec2d& mouse_pos) const
 {
@@ -132,8 +131,7 @@ bool GLGizmosManager::init_arrow(const BackgroundTexture::Metadata& arrow_textur
     bool res = false;
 
     if (!arrow_texture.filename.empty())
-        res = m_arrow_texture.texture.load_from_file(path + arrow_texture.filename, false, GLTexture::SingleThreaded, false);
-//        res = m_arrow_texture.texture.load_from_svg_file(path + arrow_texture.filename, false, true, false, 100);
+        res = m_arrow_texture.texture.load_from_svg_file(path + arrow_texture.filename, false, false, false, 1000);
     if (res)
         m_arrow_texture.metadata = arrow_texture;
 
@@ -164,10 +162,8 @@ void GLGizmosManager::refresh_on_off_state()
         return;
 
     if (m_current != Undefined
-    && ! m_gizmos[m_current]->is_activable()) {
-        activate_gizmo(Undefined);
+    && ! m_gizmos[m_current]->is_activable() && activate_gizmo(Undefined))
         update_data();
-    }
 }
 
 void GLGizmosManager::reset_all_states()
@@ -182,12 +178,26 @@ void GLGizmosManager::reset_all_states()
 bool GLGizmosManager::open_gizmo(EType type)
 {
     int idx = int(type);
-    if (m_gizmos[idx]->is_activable()) {
-        activate_gizmo(m_current == idx ? Undefined : (EType)idx);
+    if (m_gizmos[idx]->is_activable()
+     && activate_gizmo(m_current == idx ? Undefined : (EType)idx)) {
         update_data();
         return true;
     }
     return false;
+}
+
+
+bool GLGizmosManager::check_gizmos_closed_except(EType type) const
+{
+    if (get_current_type() != type && get_current_type() != Undefined) {
+        wxGetApp().plater()->get_notification_manager()->push_notification(
+                    NotificationType::CustomSupportsAndSeamRemovedAfterRepair,
+                    NotificationManager::NotificationLevel::PrintInfoNotificationLevel,
+                    _u8L("ERROR: Please close all manipulators available from "
+                         "the left toolbar first"));
+        return false;
+    }
+    return true;
 }
 
 void GLGizmosManager::set_hover_id(int id)
@@ -473,7 +483,7 @@ void GLGizmosManager::render_painter_gizmo() const
     if (!m_enabled || m_current == Undefined)
         return;
 
-    auto* gizmo = dynamic_cast<GLGizmoPainterBase*>(get_current());
+    auto *gizmo = dynamic_cast<GLGizmoPainterBase*>(get_current());
     assert(gizmo); // check the precondition
     gizmo->render_painter_gizmo();
 }
@@ -538,7 +548,7 @@ bool GLGizmosManager::on_mouse(wxMouseEvent& evt)
     // mouse anywhere
     if (evt.Moving()) {
         m_tooltip = update_hover_state(mouse_pos);
-        if (m_current == MmuSegmentation)
+        if (m_current == MmuSegmentation || m_current == FdmSupports)
             gizmo_event(SLAGizmoEventType::Moving, mouse_pos, evt.ShiftDown(), evt.AltDown());
     } else if (evt.LeftUp()) {
         if (m_mouse_capture.left) {
@@ -643,7 +653,7 @@ bool GLGizmosManager::on_mouse(wxMouseEvent& evt)
 
     if (get_gizmo_idx_from_mouse(mouse_pos) == Undefined) {
         // mouse is outside the toolbar
-        m_tooltip = "";
+        m_tooltip.clear();
 
         if (evt.LeftDown() && (!control_down || grabber_contains_mouse())) {
             if ((m_current == SlaSupports || m_current == Hollow || m_current == FdmSupports || m_current == Seam || m_current == MmuSegmentation)
@@ -705,11 +715,17 @@ bool GLGizmosManager::on_mouse(wxMouseEvent& evt)
         }
         else if (evt.LeftUp() && m_current == Flatten && m_gizmos[m_current]->get_hover_id() != -1) {
             // to avoid to loose the selection when user clicks an the white faces of a different object while the Flatten gizmo is active
+            selection.stop_dragging();
+            wxGetApp().obj_manipul()->set_dirty();
             processed = true;
         }
         else if (evt.RightUp() && (m_current == FdmSupports || m_current == Seam || m_current == MmuSegmentation) && !m_parent.is_mouse_dragging()) {
             gizmo_event(SLAGizmoEventType::RightUp, mouse_pos, evt.ShiftDown(), evt.AltDown(), control_down);
             processed = true;
+        }
+        else if (evt.LeftUp()) {
+            selection.stop_dragging();
+            wxGetApp().obj_manipul()->set_dirty();
         }
     }
     else {
@@ -914,6 +930,10 @@ bool GLGizmosManager::on_key(wxKeyEvent& evt)
             case WXK_NUMPAD_DOWN: case WXK_DOWN: { do_move(-1.0); break; }
             default: { break; }
             }
+        } else if (m_current == Simplify && keyCode == WXK_ESCAPE) {
+            GLGizmoSimplify *simplify = dynamic_cast<GLGizmoSimplify *>(get_current());
+            if (simplify != nullptr) 
+                processed = simplify->on_esc_key_down();
         }
     }
 
@@ -1019,7 +1039,7 @@ void GLGizmosManager::render_arrow(const GLCanvas3D& parent, EType highlighted_t
             
             float arrow_sides_ratio = (float)m_arrow_texture.texture.get_height() / (float)m_arrow_texture.texture.get_width();
 
-            GLTexture::render_sub_texture(tex_id, zoomed_top_x + zoomed_icons_size * 1.2f, zoomed_top_x + zoomed_icons_size * 1.2f + zoomed_icons_size * arrow_sides_ratio, zoomed_top_y - zoomed_icons_size, zoomed_top_y, { { internal_left_uv, internal_top_uv }, { internal_left_uv, internal_bottom_uv }, { internal_right_uv, internal_bottom_uv }, { internal_right_uv, internal_top_uv } });
+            GLTexture::render_sub_texture(tex_id, zoomed_top_x + zoomed_icons_size * 1.2f, zoomed_top_x + zoomed_icons_size * 1.2f + zoomed_icons_size * 2.2f * arrow_sides_ratio, zoomed_top_y - zoomed_icons_size * 1.6f , zoomed_top_y + zoomed_icons_size * 0.6f, { { internal_left_uv, internal_bottom_uv }, { internal_left_uv, internal_top_uv }, { internal_right_uv, internal_top_uv }, { internal_right_uv, internal_bottom_uv } });
             break;
         }
         zoomed_top_y -= zoomed_stride_y;
@@ -1194,31 +1214,37 @@ std::string GLGizmosManager::update_hover_state(const Vec2d& mouse_pos)
     return name;
 }
 
-void GLGizmosManager::activate_gizmo(EType type)
+bool GLGizmosManager::activate_gizmo(EType type)
 {
     if (m_gizmos.empty() || m_current == type)
-        return;
+        return true;
 
-    if (m_current != Undefined) {
-        m_gizmos[m_current]->set_state(GLGizmoBase::Off);
-        if (m_gizmos[m_current]->get_state() != GLGizmoBase::Off)
-            return; // gizmo refused to be turned off, do nothing.
+    GLGizmoBase* old_gizmo = m_current == Undefined ? nullptr : m_gizmos[m_current].get();
+    GLGizmoBase* new_gizmo = type == Undefined ? nullptr : m_gizmos[type].get();
+
+    if (old_gizmo) {
+        old_gizmo->set_state(GLGizmoBase::Off);
+        if (old_gizmo->get_state() != GLGizmoBase::Off)
+            return false; // gizmo refused to be turned off, do nothing.
+
+        if (! m_parent.get_gizmos_manager().is_serializing()
+         && old_gizmo->wants_enter_leave_snapshots())
+            Plater::TakeSnapshot snapshot(wxGetApp().plater(),
+                old_gizmo->get_gizmo_leaving_text(),
+                UndoRedo::SnapshotType::LeavingGizmoWithAction);
     }
+
+    if (new_gizmo && ! m_parent.get_gizmos_manager().is_serializing()
+     && new_gizmo->wants_enter_leave_snapshots())
+        Plater::TakeSnapshot snapshot(wxGetApp().plater(),
+            new_gizmo->get_gizmo_entering_text(),
+            UndoRedo::SnapshotType::EnteringGizmo);
 
     m_current = type;
 
-    // Updating common data should be left to the update_data function, which
-    // is always called after this one. activate_gizmo can be called by undo/redo,
-    // when selection is not yet deserialized, so the common data would update
-    // incorrectly (or crash if relying on unempty selection). Undo/redo stack
-    // will also call update_data, after selection is restored.
-
-    //m_common_gizmos_data->update(get_current()
-    //                       ? get_current()->get_requirements()
-    //                       : CommonGizmosDataID(0));
-
-    if (type != Undefined)
-        m_gizmos[type]->set_state(GLGizmoBase::On);
+    if (new_gizmo)
+        new_gizmo->set_state(GLGizmoBase::On);
+    return true;
 }
 
 
@@ -1240,7 +1266,7 @@ bool GLGizmosManager::is_in_editing_mode(bool error_notification) const
     if (error_notification)
         wxGetApp().plater()->get_notification_manager()->push_notification(
                     NotificationType::QuitSLAManualMode,
-                    NotificationManager::NotificationLevel::ErrorNotification,
+                    NotificationManager::NotificationLevel::ErrorNotificationLevel,
                     _u8L("You are currently editing SLA support points. Please, "
                          "apply or discard your changes first."));
 

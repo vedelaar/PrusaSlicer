@@ -334,6 +334,46 @@ extern std::vector<BoundingBox> get_extents_vector(const Polygons &polygons)
     return out;
 }
 
+// Polygon must be valid (at least three points), collinear points and duplicate points removed.
+bool polygon_is_convex(const Points &poly)
+{
+    if (poly.size() < 3)
+        return false;
+
+    Point p0 = poly[poly.size() - 2];
+    Point p1 = poly[poly.size() - 1];
+    for (size_t i = 0; i < poly.size(); ++ i) {
+        Point p2 = poly[i];
+        auto det = cross2((p1 - p0).cast<int64_t>(), (p2 - p1).cast<int64_t>());
+        if (det < 0)
+            return false;
+        p0 = p1;
+        p1 = p2;
+    }
+    return true;
+}
+
+bool has_duplicate_points(const Polygons &polys)
+{
+#if 1
+    // Check globally.
+    size_t cnt = 0;
+    for (const Polygon &poly : polys)
+        cnt += poly.points.size();
+    std::vector<Point> allpts;
+    allpts.reserve(cnt);
+    for (const Polygon &poly : polys)
+        allpts.insert(allpts.end(), poly.points.begin(), poly.points.end());
+    return has_duplicate_points(std::move(allpts));
+#else
+    // Check per contour.
+    for (const Polygon &poly : polys)
+        if (has_duplicate_points(poly))
+            return true;
+    return false;
+#endif
+}
+
 static inline bool is_stick(const Point &p1, const Point &p2, const Point &p3)
 {
     Point v1 = p2 - p1;

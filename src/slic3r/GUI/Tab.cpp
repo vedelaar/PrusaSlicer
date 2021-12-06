@@ -492,17 +492,17 @@ void Tab::OnActivate()
     activate_selected_page([](){});
     m_hsizer->Layout();
 
-    // Workaroud for Menu instead of NoteBook
 #ifdef _MSW_DARK_MODE
-//    if (wxGetApp().tabs_as_menu()) 
-    {
-        wxSize sz = m_presets_choice->GetSize(); 
-        wxSize ok_sz = wxSize(35 * m_em_unit, m_presets_choice->GetBestSize().y+1);
-        if (sz != ok_sz) {
-            m_presets_choice->SetMinSize(ok_sz);
-            m_presets_choice->SetSize(ok_sz);
-            GetSizer()->GetItem(size_t(0))->GetSizer()->Layout();
-        }
+    // Because of DarkMode we use our own Notebook (inherited from wxSiplebook) instead of wxNotebook
+    // And it looks like first Layout of the page doesn't update a size of the m_presets_choice
+    // So we have to set correct size explicitely
+    if (wxSize ok_sz = wxSize(35 * m_em_unit, m_presets_choice->GetBestSize().y);
+        ok_sz != m_presets_choice->GetSize()) {
+        m_presets_choice->SetMinSize(ok_sz);
+        m_presets_choice->SetSize(ok_sz);
+        GetSizer()->GetItem(size_t(0))->GetSizer()->Layout();
+        if (wxGetApp().tabs_as_menu())
+            m_presets_choice->update();
     }
 #endif // _MSW_DARK_MODE
     Refresh();
@@ -1188,11 +1188,21 @@ void Tab::activate_option(const std::string& opt_key, const wxString& category)
         break;
     }
 
+    auto set_focus = [](wxWindow* win) {
+        win->SetFocus();
+#ifdef WIN32
+        if (wxTextCtrl* text = dynamic_cast<wxTextCtrl*>(win))
+            text->SetSelection(-1, -1);
+        else if (wxSpinCtrl* spin = dynamic_cast<wxSpinCtrl*>(win))
+            spin->SetSelection(-1, -1);
+#endif // WIN32
+    };
+
     Field* field = get_field(opt_key);
 
     // focused selected field
     if (field)
-        field->getWindow()->SetFocus();
+        set_focus(field->getWindow());
     else if (category == "Single extruder MM setup") {
         // When we show and hide "Single extruder MM setup" page, 
         // related options are still in the search list
@@ -1200,7 +1210,7 @@ void Tab::activate_option(const std::string& opt_key, const wxString& category)
         // as a "way" to show hidden page again
         field = get_field("single_extruder_multi_material");
         if (field)
-            field->getWindow()->SetFocus();
+            set_focus(field->getWindow());
     }
 
     m_highlighter.init(get_custom_ctrl_with_blinking_ptr(opt_key));
@@ -1218,12 +1228,20 @@ void Tab::cache_config_diff(const std::vector<std::string>& selected_options)
 
 void Tab::apply_config_from_cache()
 {
+    bool was_applied = false;
+    // check and apply extruders count for printer preset
+    if (m_type == Preset::TYPE_PRINTER)
+        was_applied = static_cast<TabPrinter*>(this)->apply_extruder_cnt_from_cache();
+
     if (!m_cache_config.empty()) {
         m_presets->get_edited_preset().config.apply(m_cache_config);
         m_cache_config.clear();
 
-        update_dirty();
+        was_applied = true;
     }
+
+    if (was_applied)
+        update_dirty();
 }
 
 
@@ -1414,7 +1432,7 @@ void TabPrint::build()
     load_initial_data();
 
     auto page = add_options_page(L("Layers and perimeters"), "layers");
-        wxString category_path = "layers-and-perimeters_1748#";
+        std::string category_path = "layers-and-perimeters_1748#";
         auto optgroup = page->new_optgroup(L("Layer height"));
         optgroup->append_single_option_line("layer_height", category_path + "layer-height");
         optgroup->append_single_option_line("first_layer_height", category_path + "first-layer-height");
@@ -1460,14 +1478,13 @@ void TabPrint::build()
         optgroup = page->new_optgroup(L("Advanced"));
         optgroup->append_single_option_line("seam_position", category_path + "seam-position");
         optgroup->append_single_option_line("external_perimeters_first", category_path + "external-perimeters-first");
-        optgroup->append_single_option_line("gap_fill_enabled");
+        optgroup->append_single_option_line("gap_fill_enabled", category_path + "fill-gaps");
 
         optgroup = page->new_optgroup(L("Fuzzy skin (experimental)"));
-        Option option = optgroup->get_option("fuzzy_skin");
-//        option.opt.width = 30;
-        optgroup->append_single_option_line(option);
-        optgroup->append_single_option_line(optgroup->get_option("fuzzy_skin_thickness"));
-        optgroup->append_single_option_line(optgroup->get_option("fuzzy_skin_point_dist"));
+        category_path = "fuzzy-skin_246186/#";
+        optgroup->append_single_option_line("fuzzy_skin", category_path + "fuzzy-skin-type");
+        optgroup->append_single_option_line("fuzzy_skin_thickness", category_path + "fuzzy-skin-thickness");
+        optgroup->append_single_option_line("fuzzy_skin_point_dist", category_path + "fuzzy-skin-point-distance");
 
     page = add_options_page(L("Infill"), "infill");
         category_path = "infill_42#";
@@ -1480,12 +1497,14 @@ void TabPrint::build()
         optgroup->append_single_option_line("bottom_fill_pattern", category_path + "bottom-fill-pattern");
 
         optgroup = page->new_optgroup(L("Ironing"));
-        optgroup->append_single_option_line("ironing");
-        optgroup->append_single_option_line("ironing_type");
-        optgroup->append_single_option_line("ironing_flowrate");
-        optgroup->append_single_option_line("ironing_spacing");
+        category_path = "ironing_177488#";
+        optgroup->append_single_option_line("ironing", category_path);
+        optgroup->append_single_option_line("ironing_type", category_path + "ironing-type");
+        optgroup->append_single_option_line("ironing_flowrate", category_path + "flow-rate");
+        optgroup->append_single_option_line("ironing_spacing", category_path + "spacing-between-ironing-passes");
 
         optgroup = page->new_optgroup(L("Reducing printing time"));
+        category_path = "infill_42#";
         optgroup->append_single_option_line("infill_every_layers", category_path + "combine-infill-every-x-layers");
         optgroup->append_single_option_line("infill_only_where_needed", category_path + "only-infill-where-needed");
 
@@ -1509,7 +1528,7 @@ void TabPrint::build()
         optgroup = page->new_optgroup(L("Brim"));
         optgroup->append_single_option_line("brim_type", category_path + "brim");
         optgroup->append_single_option_line("brim_width", category_path + "brim");
-        optgroup->append_single_option_line("brim_offset", category_path + "brim");
+        optgroup->append_single_option_line("brim_separation", category_path + "brim");
 
     page = add_options_page(L("Support material"), "support");
         category_path = "support-material_1698#";
@@ -1518,12 +1537,12 @@ void TabPrint::build()
         optgroup->append_single_option_line("support_material_auto", category_path + "auto-generated-supports");
         optgroup->append_single_option_line("support_material_threshold", category_path + "overhang-threshold");
         optgroup->append_single_option_line("support_material_enforce_layers", category_path + "enforce-support-for-the-first");
+        optgroup->append_single_option_line("raft_first_layer_density", category_path + "raft-first-layer-density");
+        optgroup->append_single_option_line("raft_first_layer_expansion", category_path + "raft-first-layer-expansion");
 
         optgroup = page->new_optgroup(L("Raft"));
         optgroup->append_single_option_line("raft_layers", category_path + "raft-layers");
-        optgroup->append_single_option_line("raft_first_layer_density", category_path + "raft-first-layer-density");
-        optgroup->append_single_option_line("raft_first_layer_expansion", category_path + "raft-first-layer-expansion");
-        optgroup->append_single_option_line("raft_contact_distance");
+        optgroup->append_single_option_line("raft_contact_distance", category_path + "raft-layers");
         optgroup->append_single_option_line("raft_expansion");
 
         optgroup = page->new_optgroup(L("Options for support material and raft"));
@@ -1565,12 +1584,14 @@ void TabPrint::build()
 
         optgroup = page->new_optgroup(L("Modifiers"));
         optgroup->append_single_option_line("first_layer_speed");
+        optgroup->append_single_option_line("first_layer_speed_over_raft");
 
         optgroup = page->new_optgroup(L("Acceleration control (advanced)"));
         optgroup->append_single_option_line("perimeter_acceleration");
         optgroup->append_single_option_line("infill_acceleration");
         optgroup->append_single_option_line("bridge_acceleration");
         optgroup->append_single_option_line("first_layer_acceleration");
+        optgroup->append_single_option_line("first_layer_acceleration_over_raft");
         optgroup->append_single_option_line("default_acceleration");
 
         optgroup = page->new_optgroup(L("Autospeed (advanced)"));
@@ -1629,6 +1650,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("slice_closing_radius");
         optgroup->append_single_option_line("slicing_mode");
         optgroup->append_single_option_line("resolution");
+        optgroup->append_single_option_line("gcode_resolution");
         optgroup->append_single_option_line("xy_size_compensation");
         optgroup->append_single_option_line("elefant_foot_compensation", "elephant-foot-compensation_114487");
 
@@ -1646,11 +1668,17 @@ void TabPrint::build()
         optgroup = page->new_optgroup(L("Output file"));
         optgroup->append_single_option_line("gcode_comments");
         optgroup->append_single_option_line("gcode_label_objects");
-        option = optgroup->get_option("output_filename_format");
+        Option option = optgroup->get_option("output_filename_format");
         option.opt.full_width = true;
         optgroup->append_single_option_line(option);
 
         optgroup = page->new_optgroup(L("Post-processing scripts"), 0);
+        line = { "", "" };
+        line.full_width = 1;
+        line.widget = [this](wxWindow* parent) {
+            return description_line_widget(parent, &m_post_process_explanation);
+        };
+        optgroup->append_line(line);
         option = optgroup->get_option("post_process");
         option.opt.full_width = true;
         option.opt.height = 5;//50;
@@ -1666,7 +1694,7 @@ void TabPrint::build()
     page = add_options_page(L("Dependencies"), "wrench.png");
         optgroup = page->new_optgroup(L("Profile dependencies"));
 
-        create_line_with_widget(optgroup.get(), "compatible_printers", wxEmptyString, [this](wxWindow* parent) {
+        create_line_with_widget(optgroup.get(), "compatible_printers", "", [this](wxWindow* parent) {
             return compatible_widget_create(parent, m_compatible_printers);
         });
         
@@ -1699,6 +1727,14 @@ void TabPrint::update_description_lines()
         m_top_bottom_shell_thickness_explanation->SetText(
             from_u8(PresetHints::top_bottom_shell_thickness_explanation(*m_preset_bundle)));
     }
+
+    if (m_active_page && m_active_page->title() == "Output options" && m_post_process_explanation) {
+        m_post_process_explanation->SetText(
+            _u8L("Post processing scripts shall modify G-code file in place."));
+#ifndef __linux__
+        m_post_process_explanation->SetPathEnd("post-processing-scripts_283913");
+#endif // __linux__
+    }
 }
 
 void TabPrint::toggle_options()
@@ -1714,6 +1750,18 @@ void TabPrint::update()
         return; // ys_FIXME
 
     m_update_cnt++;
+
+    // see https://github.com/prusa3d/PrusaSlicer/issues/6814
+    // ysFIXME: It's temporary workaround and should be clewer reworked:
+    // Note: This workaround works till "support_material" and "overhangs" is exclusive sets of mutually no-exclusive parameters.
+    // But it should be corrected when we will have more such sets.
+    // Disable check of the compatibility of the "support_material" and "overhangs" options for saved user profile
+    if (!m_config_manipulation.is_initialized_support_material_overhangs_queried()) {
+        const Preset& selected_preset = m_preset_bundle->prints.get_selected_preset();
+        bool is_user_and_saved_preset = !selected_preset.is_system && !selected_preset.is_dirty;
+        bool support_material_overhangs_queried = m_config->opt_bool("support_material") && !m_config->opt_bool("overhangs");
+        m_config_manipulation.initialize_support_material_overhangs_queried(is_user_and_saved_preset && support_material_overhangs_queried);
+    }
 
     m_config_manipulation.update_print_fff_config(m_config, true);
 
@@ -1740,6 +1788,7 @@ void TabPrint::clear_pages()
 
     m_recommended_thin_wall_thickness_description_line = nullptr;
     m_top_bottom_shell_thickness_explanation = nullptr;
+    m_post_process_explanation = nullptr;
 }
 
 bool Tab::validate_custom_gcode(const wxString& title, const std::string& gcode)
@@ -1747,14 +1796,14 @@ bool Tab::validate_custom_gcode(const wxString& title, const std::string& gcode)
     std::vector<std::string> tags;
     bool invalid = GCodeProcessor::contains_reserved_tags(gcode, 5, tags);
     if (invalid) {
-        wxString reports = _L_PLURAL("The following line", "The following lines", tags.size());
-        reports += ":\n";
-        for (const std::string& keyword : tags) {
-            reports += ";" + keyword + "\n";
-        }
-        reports += _L("contain reserved keywords.") + "\n";
-        reports += _L("Please remove them, as they may cause problems in g-code visualization and printing time estimation.");
-
+        std::string lines = ":\n";
+        for (const std::string& keyword : tags)
+            lines += ";" + keyword + "\n";
+        wxString reports = format_wxstr(
+            _L_PLURAL("The following line %s contains reserved keywords.\nPlease remove it, as it may cause problems in G-code visualization and printing time estimation.", 
+                      "The following lines %s contain reserved keywords.\nPlease remove them, as they may cause problems in G-code visualization and printing time estimation.", 
+                      tags.size()),
+            lines);
         //wxMessageDialog dialog(wxGetApp().mainframe, reports, _L("Found reserved keywords in") + " " + _(title), wxICON_WARNING | wxOK);
         MessageDialog dialog(wxGetApp().mainframe, reports, _L("Found reserved keywords in") + " " + _(title), wxICON_WARNING | wxOK);
         dialog.ShowModal();
@@ -1904,7 +1953,7 @@ void TabFilament::build()
         optgroup->append_line(line);
 
     page = add_options_page(L("Cooling"), "cooling");
-        wxString category_path = "cooling_127569#";
+        std::string category_path = "cooling_127569#";
         optgroup = page->new_optgroup(L("Enable"));
         optgroup->append_single_option_line("fan_always_on");
         optgroup->append_single_option_line("cooling");
@@ -1965,7 +2014,7 @@ void TabFilament::build()
         optgroup->append_single_option_line("filament_cooling_initial_speed");
         optgroup->append_single_option_line("filament_cooling_final_speed");
 
-        create_line_with_widget(optgroup.get(), "filament_ramming_parameters", wxEmptyString, [this](wxWindow* parent) {
+        create_line_with_widget(optgroup.get(), "filament_ramming_parameters", "", [this](wxWindow* parent) {
             auto ramming_dialog_btn = new wxButton(parent, wxID_ANY, _(L("Ramming settings"))+dots, wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
             wxGetApp().UpdateDarkUI(ramming_dialog_btn);
             ramming_dialog_btn->SetFont(Slic3r::GUI::wxGetApp().normal_font());
@@ -2021,7 +2070,7 @@ void TabFilament::build()
 
     page = add_options_page(L("Dependencies"), "wrench.png");
         optgroup = page->new_optgroup(L("Profile dependencies"));
-        create_line_with_widget(optgroup.get(), "compatible_printers", wxEmptyString, [this](wxWindow* parent) {
+        create_line_with_widget(optgroup.get(), "compatible_printers", "", [this](wxWindow* parent) {
             return compatible_widget_create(parent, m_compatible_printers);
         });
 
@@ -2029,7 +2078,7 @@ void TabFilament::build()
         option.opt.full_width = true;
         optgroup->append_single_option_line(option);
 
-        create_line_with_widget(optgroup.get(), "compatible_prints", wxEmptyString, [this](wxWindow* parent) {
+        create_line_with_widget(optgroup.get(), "compatible_prints", "", [this](wxWindow* parent) {
             return compatible_widget_create(parent, m_compatible_prints);
         });
 
@@ -2446,14 +2495,10 @@ void TabPrinter::build_sla()
 
     optgroup = page->new_optgroup(L("Corrections"));
     line = Line{ m_config->def()->get("relative_correction")->full_label, "" };
-//    std::vector<std::string> axes{ "X", "Y", "Z" };
-    std::vector<std::string> axes{ "XY", "Z" };
-    int id = 0;
-    for (auto& axis : axes) {
-        auto opt = optgroup->get_option("relative_correction", id);
+    for (auto& axis : { "X", "Y", "Z" }) {
+        auto opt = optgroup->get_option(std::string("relative_correction_") + char(std::tolower(axis[0])));
         opt.opt.label = axis;
         line.append_option(opt);
-        ++id;
     }
     optgroup->append_line(line);
     optgroup->append_single_option_line("absolute_correction");
@@ -2559,7 +2604,7 @@ PageShp TabPrinter::build_kinematics_page()
         optgroup->append_line(line);
     }
 
-    std::vector<std::string> axes{ "x", "y", "z", "e" };
+    const std::vector<std::string> axes{ "x", "y", "z", "e" };
     optgroup = page->new_optgroup(L("Maximum feedrates"));
         for (const std::string &axis : axes)	{
             append_option_line(optgroup, "machine_max_feedrate_" + axis);
@@ -2664,7 +2709,7 @@ void TabPrinter::build_unregular_pages(bool from_initial_build/* = false*/)
         m_pages.insert(m_pages.begin() + n_before_extruders + extruder_idx, page);
 
             auto optgroup = page->new_optgroup(L("Size"));
-            optgroup->append_single_option_line("nozzle_diameter", wxEmptyString, extruder_idx);
+            optgroup->append_single_option_line("nozzle_diameter", "", extruder_idx);
 
             optgroup->m_on_change = [this, extruder_idx](const t_config_option_key& opt_key, boost::any value)
             {
@@ -2703,32 +2748,32 @@ void TabPrinter::build_unregular_pages(bool from_initial_build/* = false*/)
             };
 
             optgroup = page->new_optgroup(L("Layer height limits"));
-            optgroup->append_single_option_line("min_layer_height", wxEmptyString, extruder_idx);
-            optgroup->append_single_option_line("max_layer_height", wxEmptyString, extruder_idx);
+            optgroup->append_single_option_line("min_layer_height", "", extruder_idx);
+            optgroup->append_single_option_line("max_layer_height", "", extruder_idx);
 
 
             optgroup = page->new_optgroup(L("Position (for multi-extruder printers)"));
-            optgroup->append_single_option_line("extruder_offset", wxEmptyString, extruder_idx);
+            optgroup->append_single_option_line("extruder_offset", "", extruder_idx);
 
             optgroup = page->new_optgroup(L("Retraction"));
-            optgroup->append_single_option_line("retract_length", wxEmptyString, extruder_idx);
-            optgroup->append_single_option_line("retract_lift", wxEmptyString, extruder_idx);
+            optgroup->append_single_option_line("retract_length", "", extruder_idx);
+            optgroup->append_single_option_line("retract_lift", "", extruder_idx);
                 Line line = { L("Only lift Z"), "" };
                 line.append_option(optgroup->get_option("retract_lift_above", extruder_idx));
                 line.append_option(optgroup->get_option("retract_lift_below", extruder_idx));
                 optgroup->append_line(line);
 
-            optgroup->append_single_option_line("retract_speed", wxEmptyString, extruder_idx);
-            optgroup->append_single_option_line("deretract_speed", wxEmptyString, extruder_idx);
-            optgroup->append_single_option_line("retract_restart_extra", wxEmptyString, extruder_idx);
-            optgroup->append_single_option_line("retract_before_travel", wxEmptyString, extruder_idx);
-            optgroup->append_single_option_line("retract_layer_change", wxEmptyString, extruder_idx);
-            optgroup->append_single_option_line("wipe", wxEmptyString, extruder_idx);
-            optgroup->append_single_option_line("retract_before_wipe", wxEmptyString, extruder_idx);
+            optgroup->append_single_option_line("retract_speed", "", extruder_idx);
+            optgroup->append_single_option_line("deretract_speed", "", extruder_idx);
+            optgroup->append_single_option_line("retract_restart_extra", "", extruder_idx);
+            optgroup->append_single_option_line("retract_before_travel", "", extruder_idx);
+            optgroup->append_single_option_line("retract_layer_change", "", extruder_idx);
+            optgroup->append_single_option_line("wipe", "", extruder_idx);
+            optgroup->append_single_option_line("retract_before_wipe", "", extruder_idx);
 
             optgroup = page->new_optgroup(L("Retraction when tool is disabled (advanced settings for multi-extruder setups)"));
-            optgroup->append_single_option_line("retract_length_toolchange", wxEmptyString, extruder_idx);
-            optgroup->append_single_option_line("retract_restart_extra_toolchange", wxEmptyString, extruder_idx);
+            optgroup->append_single_option_line("retract_length_toolchange", "", extruder_idx);
+            optgroup->append_single_option_line("retract_restart_extra_toolchange", "", extruder_idx);
 
             optgroup = page->new_optgroup(L("Preview"));
 
@@ -2756,7 +2801,7 @@ void TabPrinter::build_unregular_pages(bool from_initial_build/* = false*/)
 
                 return sizer;
             };
-            line = optgroup->create_single_option_line("extruder_colour", wxEmptyString, extruder_idx);
+            line = optgroup->create_single_option_line("extruder_colour", "", extruder_idx);
             line.append_widget(reset_to_filament_color);
             optgroup->append_line(line);
     }
@@ -3216,7 +3261,7 @@ void Tab::select_preset(std::string preset_name, bool delete_current /*=false*/,
 		const PresetWithVendorProfile new_printer_preset_with_vendor_profile = m_presets->get_preset_with_vendor_profile(new_printer_preset);
         PrinterTechnology    old_printer_technology = m_presets->get_edited_preset().printer_technology();
         PrinterTechnology    new_printer_technology = new_printer_preset.printer_technology();
-        if (new_printer_technology == ptSLA && old_printer_technology == ptFFF && !may_switch_to_SLA_preset())
+        if (new_printer_technology == ptSLA && old_printer_technology == ptFFF && !wxGetApp().may_switch_to_SLA_preset(_L("New printer preset selected")))
             canceled = true;
         else {
             struct PresetUpdate {
@@ -3322,10 +3367,6 @@ void Tab::select_preset(std::string preset_name, bool delete_current /*=false*/,
                 m_dependent_tabs = { Preset::Type::TYPE_SLA_PRINT, Preset::Type::TYPE_SLA_MATERIAL };
         }
 
-        // check and apply extruders count for printer preset
-        if (m_type == Preset::TYPE_PRINTER)
-            static_cast<TabPrinter*>(this)->apply_extruder_cnt_from_cache();
-
         // check if there is something in the cache to move to the new selected preset
         apply_config_from_cache();
 
@@ -3390,21 +3431,6 @@ bool Tab::may_discard_current_dirty_preset(PresetCollection* presets /*= nullptr
             wxGetApp().get_tab(presets->type())->cache_config_diff(selected_options);
     }
 
-    return true;
-}
-
-// If we are switching from the FFF-preset to the SLA, we should to control the printed objects if they have a part(s).
-// Because of we can't to print the multi-part objects with SLA technology.
-bool Tab::may_switch_to_SLA_preset()
-{
-    if (model_has_multi_part_objects(wxGetApp().model()))
-    {
-        show_info( parent(),
-                    _(L("It's impossible to print multi-part object(s) with SLA technology.")) + "\n\n" +
-                    _(L("Please check your object list before preset changing.")),
-                    _(L("Attention!")) );
-        return false;
-    }
     return true;
 }
 
@@ -3558,6 +3584,7 @@ void Tab::save_preset(std::string name /*= ""*/, bool detach)
     on_presets_changed();
     // If current profile is saved, "delete preset" button have to be enabled
     m_btn_delete_preset->Show();
+    m_btn_delete_preset->GetParent()->Layout();
 
     if (m_type == Preset::TYPE_PRINTER)
         static_cast<TabPrinter*>(this)->m_initial_extruders_count = static_cast<TabPrinter*>(this)->m_extruders_count;
@@ -3638,8 +3665,8 @@ void Tab::delete_preset()
                 for (const std::string& printer : ph_printers)
                     msg += "\n    \"" + from_u8(printer) + "\",";
                 msg.RemoveLast();
-                msg += "\n" + _L_PLURAL("Note, that selected preset will be deleted from this printer too.", 
-                                        "Note, that selected preset will be deleted from these printers too.", ph_printers.size()) + "\n\n";
+                msg += "\n" + _L_PLURAL("Note, that the selected preset will be deleted from this printer too.", 
+                                        "Note, that the selected preset will be deleted from these printers too.", ph_printers.size()) + "\n\n";
             }
 
             if (!ph_printers_only.empty()) {
@@ -3648,8 +3675,8 @@ void Tab::delete_preset()
                 for (const std::string& printer : ph_printers_only)
                     msg += "\n    \"" + from_u8(printer) + "\",";
                 msg.RemoveLast();
-                msg += "\n" + _L_PLURAL("Note, that this printer will be deleted after deleting of the selected preset.",
-                                        "Note, that these printers will be deleted after deleting of the selected preset.", ph_printers_only.size()) + "\n\n";
+                msg += "\n" + _L_PLURAL("Note, that this printer will be deleted after deleting the selected preset.",
+                                        "Note, that these printers will be deleted after deleting the selected preset.", ph_printers_only.size()) + "\n\n";
             }
         }
     
@@ -3723,7 +3750,7 @@ void Tab::update_ui_from_settings()
     }
 }
 
-void Tab::create_line_with_widget(ConfigOptionsGroup* optgroup, const std::string& opt_key, const wxString& path, widget_t widget)
+void Tab::create_line_with_widget(ConfigOptionsGroup* optgroup, const std::string& opt_key, const std::string& path, widget_t widget)
 {
     Line line = optgroup->create_single_option_line(opt_key);
     line.widget = widget;
@@ -3862,15 +3889,17 @@ void TabPrinter::cache_extruder_cnt()
     m_cache_extruder_count = m_extruders_count;
 }
 
-void TabPrinter::apply_extruder_cnt_from_cache()
+bool TabPrinter::apply_extruder_cnt_from_cache()
 {
     if (m_presets->get_edited_preset().printer_technology() == ptSLA)
-        return;
+        return false;
 
     if (m_cache_extruder_count > 0) {
         m_presets->get_edited_preset().set_num_extruders(m_cache_extruder_count);
         m_cache_extruder_count = 0;
+        return true;
     }
+    return false;
 }
 
 bool Tab::validate_custom_gcodes()
@@ -4142,6 +4171,7 @@ void TabSLAMaterial::build()
     auto page = add_options_page(L("Material"), "resin");
 
     auto optgroup = page->new_optgroup(L("Material"));
+    optgroup->append_single_option_line("material_colour");
     optgroup->append_single_option_line("bottle_cost");
     optgroup->append_single_option_line("bottle_volume");
     optgroup->append_single_option_line("bottle_weight");
@@ -4149,6 +4179,12 @@ void TabSLAMaterial::build()
 
     optgroup->m_on_change = [this, optgroup](t_config_option_key opt_key, boost::any value)
     {
+        if (opt_key == "material_colour") {
+            update_dirty();
+            on_value_change(opt_key, value); 
+            return;
+        }
+
         DynamicPrintConfig new_conf = *m_config;
 
         if (opt_key == "bottle_volume") {
@@ -4181,20 +4217,14 @@ void TabSLAMaterial::build()
     optgroup->append_single_option_line("initial_exposure_time");
 
     optgroup = page->new_optgroup(L("Corrections"));
-    std::vector<std::string> corrections = {"material_correction"};
-//    std::vector<std::string> axes{ "X", "Y", "Z" };
-    std::vector<std::string> axes{ "XY", "Z" };
-    for (auto& opt_key : corrections) {
-        auto line = Line{ m_config->def()->get(opt_key)->full_label, "" };
-        int id = 0;
-        for (auto& axis : axes) {
-            auto opt = optgroup->get_option(opt_key, id);
-            opt.opt.label = axis;
-            line.append_option(opt);
-            ++id;
-        }
-        optgroup->append_line(line);
+    auto line = Line{ m_config->def()->get("material_correction")->full_label, "" };
+    for (auto& axis : { "X", "Y", "Z" }) {
+        auto opt = optgroup->get_option(std::string("material_correction_") + char(std::tolower(axis[0])));
+        opt.opt.label = axis;
+        line.append_option(opt);
     }
+
+    optgroup->append_line(line);
 
     page = add_options_page(L("Notes"), "note.png");
     optgroup = page->new_optgroup(L("Notes"), 0);
@@ -4207,7 +4237,7 @@ void TabSLAMaterial::build()
     page = add_options_page(L("Dependencies"), "wrench.png");
     optgroup = page->new_optgroup(L("Profile dependencies"));
 
-    create_line_with_widget(optgroup.get(), "compatible_printers", wxEmptyString, [this](wxWindow* parent) {
+    create_line_with_widget(optgroup.get(), "compatible_printers", "", [this](wxWindow* parent) {
         return compatible_widget_create(parent, m_compatible_printers);
     });
     
@@ -4215,7 +4245,7 @@ void TabSLAMaterial::build()
     option.opt.full_width = true;
     optgroup->append_single_option_line(option);
 
-    create_line_with_widget(optgroup.get(), "compatible_prints", wxEmptyString, [this](wxWindow* parent) {
+    create_line_with_widget(optgroup.get(), "compatible_prints", "", [this](wxWindow* parent) {
         return compatible_widget_create(parent, m_compatible_prints);
     });
 
@@ -4224,6 +4254,11 @@ void TabSLAMaterial::build()
     optgroup->append_single_option_line(option);
 
     build_preset_description_line(optgroup.get());
+
+    page = add_options_page(L("Material printing profile"), "note.png");
+    optgroup = page->new_optgroup(L("Material printing profile"));
+    option = optgroup->get_option("material_print_speed");
+    optgroup->append_single_option_line(option);
 }
 
 // Reload current config (aka presets->edited_preset->config) into the UI fields.
@@ -4232,6 +4267,13 @@ void TabSLAMaterial::reload_config()
     this->compatible_widget_reload(m_compatible_printers);
     this->compatible_widget_reload(m_compatible_prints);
     Tab::reload_config();
+}
+
+void TabSLAMaterial::toggle_options()
+{
+    const Preset &current_printer = wxGetApp().preset_bundle->printers.get_edited_preset();
+    std::string model = current_printer.config.opt_string("printer_model");
+    m_config_manipulation.toggle_field("material_print_speed", model != "SL1");
 }
 
 void TabSLAMaterial::update()
@@ -4342,7 +4384,7 @@ void TabSLAPrint::build()
     page = add_options_page(L("Dependencies"), "wrench");
     optgroup = page->new_optgroup(L("Profile dependencies"));
 
-    create_line_with_widget(optgroup.get(), "compatible_printers", wxEmptyString, [this](wxWindow* parent) {
+    create_line_with_widget(optgroup.get(), "compatible_printers", "", [this](wxWindow* parent) {
         return compatible_widget_create(parent, m_compatible_printers);
     });
 
@@ -4439,7 +4481,7 @@ ConfigManipulation Tab::get_config_manipulation()
         return on_value_change(opt_key, value);
     };
 
-    return ConfigManipulation(load_config, cb_toggle_field, cb_value_change);
+    return ConfigManipulation(load_config, cb_toggle_field, cb_value_change, nullptr, this);
 }
 
 

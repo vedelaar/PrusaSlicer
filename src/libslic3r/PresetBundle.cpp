@@ -188,7 +188,63 @@ void PresetBundle::setup_directories()
     }
 }
 
-PresetsConfigSubstitutions PresetBundle::load_presets(AppConfig &config, ForwardCompatibilitySubstitutionRule substitution_rule, const std::string &preferred_model_id)
+// recursively copy all files and dirs in from_dir to to_dir
+static void copy_dir(const boost::filesystem::path& from_dir, const boost::filesystem::path& to_dir)
+{
+    if(!boost::filesystem::is_directory(from_dir))
+        return;
+    // i assume to_dir.parent surely exists
+    if (!boost::filesystem::is_directory(to_dir))
+        boost::filesystem::create_directory(to_dir);
+    for (auto& dir_entry : boost::filesystem::directory_iterator(from_dir)) {
+        if (!boost::filesystem::is_directory(dir_entry.path())) {
+            std::string em;
+            CopyFileResult cfr = copy_file(dir_entry.path().string(), (to_dir / dir_entry.path().filename()).string(), em, false);
+            if (cfr != SUCCESS) {
+                BOOST_LOG_TRIVIAL(error) << "Error when copying files from " << from_dir << " to " << to_dir << ": " << em;
+            }
+        } else {
+            copy_dir(dir_entry.path(), to_dir / dir_entry.path().filename());
+        }
+    }
+}
+
+void PresetBundle::copy_files(const std::string& from)
+{
+    boost::filesystem::path data_dir = boost::filesystem::path(Slic3r::data_dir());
+    // list of searched paths based on current directory system in setup_directories()
+    // do not copy cache and snapshots
+    boost::filesystem::path from_data_dir = boost::filesystem::path(from);
+    std::initializer_list<boost::filesystem::path> from_dirs= {
+        from_data_dir / "vendor",
+        from_data_dir / "shapes",
+#ifdef SLIC3R_PROFILE_USE_PRESETS_SUBDIR
+        // Store the print/filament/printer presets into a "presets" directory.
+        data_dir / "presets",
+        data_dir / "presets" / "print",
+        data_dir / "presets" / "filament",
+        data_dir / "presets" / "sla_print",
+        data_dir / "presets" / "sla_material",
+        data_dir / "presets" / "printer",
+        data_dir / "presets" / "physical_printer"
+#else
+        // Store the print/filament/printer presets at the same location as the upstream Slic3r.
+        from_data_dir / "print",
+        from_data_dir / "filament",
+        from_data_dir / "sla_print",
+        from_data_dir / "sla_material",
+        from_data_dir / "printer",
+        from_data_dir / "physical_printer"
+#endif
+    };
+    // copy recursively all files
+    for (const boost::filesystem::path& from_dir : from_dirs) {
+        copy_dir(from_dir, data_dir / from_dir.filename());
+    }
+}
+
+PresetsConfigSubstitutions PresetBundle::load_presets(AppConfig &config, ForwardCompatibilitySubstitutionRule substitution_rule, 
+                                                      const PresetPreferences& preferred_selection/* = PresetPreferences()*/)
 {
     // First load the vendor specific system presets.
     PresetsConfigSubstitutions substitutions;
@@ -239,7 +295,7 @@ PresetsConfigSubstitutions PresetBundle::load_presets(AppConfig &config, Forward
     if (! errors_cummulative.empty())
         throw Slic3r::RuntimeError(errors_cummulative);
 
-    this->load_selections(config, preferred_model_id);
+    this->load_selections(config, preferred_selection);
 
     return substitutions;
 }
@@ -441,7 +497,7 @@ void PresetBundle::load_installed_sla_materials(AppConfig &config)
 
 // Load selections (current print, current filaments, current printer) from config.ini
 // This is done on application start up or after updates are applied.
-void PresetBundle::load_selections(AppConfig &config, const std::string &preferred_model_id)
+void PresetBundle::load_selections(AppConfig &config, const PresetPreferences& preferred_selection/* = PresetPreferences()*/)
 {
 	// Update visibility of presets based on application vendor / model / variant configuration.
 	this->load_installed_printers(config);
@@ -464,12 +520,9 @@ void PresetBundle::load_selections(AppConfig &config, const std::string &preferr
     // will be selected by the following call of this->update_compatible(PresetSelectCompatibleType::Always).
 
     const Preset *initial_printer = printers.find_preset(initial_printer_profile_name);
-    const Preset *preferred_printer = printers.find_by_model_id(preferred_model_id);
-    printers.select_preset_by_name(
-        (preferred_printer != nullptr && (initial_printer == nullptr || !initial_printer->is_visible)) ? 
-            preferred_printer->name : 
-            initial_printer_profile_name,
-        true);
+    // If executed due to a Config Wizard update, preferred_printer contains the first newly installed printer, otherwise nullptr.
+    const Preset *preferred_printer = printers.find_system_preset_by_model_and_variant(preferred_selection.printer_model_id, preferred_selection.printer_variant);
+    printers.select_preset_by_name(preferred_printer ? preferred_printer->name : initial_printer_profile_name, true);
 
     // Selects the profile, leaves it to -1 if the initial profile name is empty or if it was not found.
     prints.select_preset_by_name_strict(initial_print_profile_name);
@@ -496,6 +549,25 @@ void PresetBundle::load_selections(AppConfig &config, const std::string &preferr
     // exist.
     this->update_compatible(PresetSelectCompatibleType::Always);
     this->update_multi_material_filament_presets();
+
+    if (initial_printer != nullptr && (preferred_printer == nullptr || initial_printer == preferred_printer)) {
+        // Don't run the following code, as we want to activate default filament / SLA material profiles when installing and selecting a new printer.
+        // Only run this code if just a filament / SLA material was installed by Config Wizard for an active Printer.
+        auto printer_technology = printers.get_selected_preset().printer_technology();
+        if (printer_technology == ptFFF && ! preferred_selection.filament.empty()) {
+            std::string preferred_preset_name = get_preset_name_by_alias(Preset::Type::TYPE_FILAMENT, preferred_selection.filament);
+            if (auto it = filaments.find_preset_internal(preferred_preset_name); 
+                it != filaments.end() && it->is_visible && it->is_compatible) {
+                filaments.select_preset_by_name_strict(preferred_preset_name);
+                this->filament_presets.front() = filaments.get_selected_preset_name();
+            }
+        } else if (printer_technology == ptSLA && ! preferred_selection.sla_material.empty()) {
+            std::string preferred_preset_name = get_preset_name_by_alias(Preset::Type::TYPE_SLA_MATERIAL, preferred_selection.sla_material);
+            if (auto it = sla_materials.find_preset_internal(preferred_preset_name);
+                it != sla_materials.end() && it->is_visible && it->is_compatible)
+                sla_materials.select_preset_by_name_strict(preferred_preset_name);
+        }
+    }
 
     // Parse the initial physical printer name.
     std::string initial_physical_printer_name = remove_ini_suffix(config.get("presets", "physical_printer"));
@@ -1467,7 +1539,7 @@ std::pair<PresetsConfigSubstitutions, size_t> PresetBundle::load_configbundle(
         if (! active_print.empty()) 
             prints.select_preset_by_name(active_print, true);
         if (! active_sla_print.empty()) 
-            sla_materials.select_preset_by_name(active_sla_print, true);
+            sla_prints.select_preset_by_name(active_sla_print, true);
         if (! active_sla_material.empty()) 
             sla_materials.select_preset_by_name(active_sla_material, true);
         if (! active_printer.empty())

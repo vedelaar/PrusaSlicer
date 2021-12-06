@@ -22,6 +22,8 @@
 
 namespace Slic3r {
 
+wxDECLARE_EVENT(wxCUSTOMEVT_JUMP_TO_OPTION, wxCommandEvent);
+
 namespace Search{
 
 class SearchDialog;
@@ -134,6 +136,10 @@ public:
             return o1.key < o2.key; });
     }
     void sort_options_by_label() { sort_options(); }
+
+    void show_dialog();
+    void dlg_sys_color_changed();
+    void dlg_msw_rescale();
 };
 
 
@@ -176,9 +182,11 @@ public:
     void Popup(wxPoint position = wxDefaultPosition);
     void ProcessSelection(wxDataViewItem selection);
 
-protected:
-    void on_dpi_changed(const wxRect& suggested_rect) override;
+    void msw_rescale();
     void on_sys_color_changed() override;
+
+protected:
+    void on_dpi_changed(const wxRect& suggested_rect) override { msw_rescale(); }
 };
 
 

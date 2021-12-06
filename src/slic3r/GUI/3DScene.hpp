@@ -8,13 +8,15 @@
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Geometry.hpp"
 
-#if ENABLE_SINKING_CONTOURS
 #include "GLModel.hpp"
-#endif // ENABLE_SINKING_CONTOURS
 
 #include <functional>
+#include <optional>
 
+#ifndef NDEBUG
 #define HAS_GLSAFE
+#endif // NDEBUG
+
 #ifdef HAS_GLSAFE
     extern void glAssertRecentCallImpl(const char *file_name, unsigned int line, const char *function_name);
     inline void glAssertRecentCall() { glAssertRecentCallImpl(__FILE__, __LINE__, __FUNCTION__); }
@@ -29,6 +31,7 @@
 namespace Slic3r {
 class SLAPrintObject;
 enum  SLAPrintObjectStep : unsigned int;
+class BuildVolume;
 class DynamicPrintConfig;
 class ExtrusionPath;
 class ExtrusionMultiPath;
@@ -38,6 +41,9 @@ class ExtrusionEntityCollection;
 class ModelObject;
 class ModelVolume;
 enum ModelInstanceEPrintVolumeState : unsigned char;
+
+// Return appropriate color based on the ModelVolume.
+std::array<float, 4> color_from_model_volume(const ModelVolume& model_volume);
 
 // A container for interleaved arrays of 3D vertices and normals,
 // possibly indexed by triangles and / or quads.
@@ -123,6 +129,8 @@ public:
     void load_mesh_full_shading(const TriangleMesh& mesh);
     void load_mesh(const TriangleMesh& mesh) { this->load_mesh_full_shading(mesh); }
 #endif // ENABLE_SMOOTH_NORMALS
+
+    void load_its_flat_shading(const indexed_triangle_set &its);
 
     inline bool has_VBOs() const { return vertices_and_normals_interleaved_VBO_id != 0; }
 
@@ -254,9 +262,7 @@ public:
     enum EHoverState : unsigned char
     {
         HS_None,
-#if ENABLE_SINKING_CONTOURS
         HS_Hover,
-#endif // ENABLE_SINKING_CONTOURS
         HS_Select,
         HS_Deselect
     };
@@ -271,17 +277,14 @@ private:
     // Shift in z required by sla supports+pad
     double        m_sla_shift_z;
     // Bounding box of this volume, in unscaled coordinates.
-    BoundingBoxf3 m_transformed_bounding_box;
-    // Whether or not is needed to recalculate the transformed bounding box.
-    bool          m_transformed_bounding_box_dirty;
+    std::optional<BoundingBoxf3> m_transformed_bounding_box;
     // Convex hull of the volume, if any.
     std::shared_ptr<const TriangleMesh> m_convex_hull;
     // Bounding box of this volume, in unscaled coordinates.
-    BoundingBoxf3 m_transformed_convex_hull_bounding_box;
-    // Whether or not is needed to recalculate the transformed convex hull bounding box.
-    bool          m_transformed_convex_hull_bounding_box_dirty;
+    std::optional<BoundingBoxf3> m_transformed_convex_hull_bounding_box;
+    // Bounding box of the non sinking part of this volume, in unscaled coordinates.
+    std::optional<BoundingBoxf3> m_transformed_non_sinking_bounding_box;
 
-#if ENABLE_SINKING_CONTOURS
     class SinkingContours
     {
         static const float HalfWidth;
@@ -299,7 +302,6 @@ private:
     };
 
     SinkingContours m_sinking_contours;
-#endif // ENABLE_SINKING_CONTOURS
 
 public:
     // Color of the triangles / quads held by this volume.
@@ -361,10 +363,8 @@ public:
 	    bool                force_native_color : 1;
         // Whether or not render this volume in neutral
         bool                force_neutral_color : 1;
-#if ENABLE_SINKING_CONTOURS
         // Whether or not to force rendering of sinking contours
         bool                force_sinking_contours : 1;
-#endif // ENABLE_SINKING_CONTOURS
     };
 
     // Is mouse or rectangle selection over this object to select/deselect it ?
@@ -393,6 +393,7 @@ public:
         return out;
     }
 
+    void set_color(const std::array<float, 4>& rgba);
     void set_render_color(float r, float g, float b, float a);
     void set_render_color(const std::array<float, 4>& rgba);
     // Sets render color in dependence of current state
@@ -473,6 +474,10 @@ public:
     BoundingBoxf3        transformed_convex_hull_bounding_box(const Transform3d &trafo) const;
     // caching variant
     const BoundingBoxf3& transformed_convex_hull_bounding_box() const;
+    // non-caching variant
+    BoundingBoxf3        transformed_non_sinking_bounding_box(const Transform3d& trafo) const;
+    // caching variant
+    const BoundingBoxf3& transformed_non_sinking_bounding_box() const;
     // convex hull
     const TriangleMesh*  convex_hull() const { return m_convex_hull.get(); }
 
@@ -485,16 +490,18 @@ public:
     void                finalize_geometry(bool opengl_initialized) { this->indexed_vertex_array.finalize_geometry(opengl_initialized); }
     void                release_geometry() { this->indexed_vertex_array.release_geometry(); }
 
-    void                set_bounding_boxes_as_dirty() { m_transformed_bounding_box_dirty = true; m_transformed_convex_hull_bounding_box_dirty = true; }
+    void                set_bounding_boxes_as_dirty() {
+        m_transformed_bounding_box.reset();
+        m_transformed_convex_hull_bounding_box.reset();
+        m_transformed_non_sinking_bounding_box.reset();
+    }
 
     bool                is_sla_support() const;
     bool                is_sla_pad() const;
 
     bool                is_sinking() const;
     bool                is_below_printbed() const;
-#if ENABLE_SINKING_CONTOURS
     void                render_sinking_contours();
-#endif // ENABLE_SINKING_CONTOURS
 
     // Return an estimate of the memory consumed by this class.
     size_t 				cpu_memory_used() const { 
@@ -520,10 +527,22 @@ public:
         All
     };
 
+    struct PrintVolume
+    {
+        // see: Bed3D::EShapeType
+        int type{ 0 };
+        // data contains:
+        // Rectangle:
+        //   [0] = min.x, [1] = min.y, [2] = max.x, [3] = max.y
+        // Circle:
+        //   [0] = center.x, [1] = center.y, [3] = radius
+        std::array<float, 4> data;
+        //   [0] = min z, [1] = max z
+        std::array<float, 2> zs;
+    };
+
 private:
-    // min and max vertex of the print box volume
-    float m_print_box_min[3];
-    float m_print_box_max[3];
+    PrintVolume m_print_volume;
 
     // z range for clipping in shaders
     float m_z_range[2];
@@ -595,10 +614,7 @@ public:
     bool empty() const { return volumes.empty(); }
     void set_range(double low, double high) { for (GLVolume *vol : this->volumes) vol->set_range(low, high); }
 
-    void set_print_box(float min_x, float min_y, float min_z, float max_x, float max_y, float max_z) {
-        m_print_box_min[0] = min_x; m_print_box_min[1] = min_y; m_print_box_min[2] = min_z;
-        m_print_box_max[0] = max_x; m_print_box_max[1] = max_y; m_print_box_max[2] = max_z;
-    }
+    void set_print_volume(const PrintVolume& print_volume) { m_print_volume = print_volume; }
 
     void set_z_range(float min_z, float max_z) { m_z_range[0] = min_z; m_z_range[1] = max_z; }
     void set_clipping_plane(const double* coeffs) { m_clipping_plane[0] = coeffs[0]; m_clipping_plane[1] = coeffs[1]; m_clipping_plane[2] = coeffs[2]; m_clipping_plane[3] = coeffs[3]; }
@@ -613,8 +629,7 @@ public:
 
     // returns true if all the volumes are completely contained in the print volume
     // returns the containment state in the given out_state, if non-null
-    bool check_outside_state(const DynamicPrintConfig* config, ModelInstanceEPrintVolumeState* out_state) const;
-    bool check_outside_state(const DynamicPrintConfig* config, bool& partlyOut, bool& fullyOut) const;
+    bool check_outside_state(const Slic3r::BuildVolume& build_volume, ModelInstanceEPrintVolumeState* out_state) const;
     void reset_outside_state();
 
     void update_colors_by_extruder(const DynamicPrintConfig* config);
@@ -651,8 +666,6 @@ struct _3DScene
     static void polyline3_to_verts(const Polyline3& polyline, double width, double height, GLVolume& volume);
     static void point3_to_verts(const Vec3crd& point, double width, double height, GLVolume& volume);
 };
-
-static constexpr float BedEpsilon = 3.f * float(EPSILON);
 
 }
 

@@ -22,17 +22,21 @@ namespace GUI {
 class GCodeViewer
 {
     using IBufferType = unsigned short;
-    using Color = std::array<float, 3>;
+    using Color = std::array<float, 4>;
     using VertexBuffer = std::vector<float>;
     using MultiVertexBuffer = std::vector<VertexBuffer>;
     using IndexBuffer = std::vector<IBufferType>;
     using MultiIndexBuffer = std::vector<IndexBuffer>;
+    using InstanceBuffer = std::vector<float>;
+    using InstanceIdBuffer = std::vector<size_t>;
+    using InstancesOffsets = std::vector<Vec3f>;
 
     static const std::vector<Color> Extrusion_Role_Colors;
     static const std::vector<Color> Options_Colors;
     static const std::vector<Color> Travel_Colors;
-    static const Color              Wipe_Color;
     static const std::vector<Color> Range_Colors;
+    static const Color              Wipe_Color;
+    static const Color              Neutral_Color;
 
     enum class EOptionsColors : unsigned char
     {
@@ -80,7 +84,10 @@ class GCodeViewer
         size_t position_size_floats() const { return 3; }
         size_t position_size_bytes() const { return position_size_floats() * sizeof(float); }
 
-        size_t normal_offset_floats() const { return position_size_floats(); }
+        size_t normal_offset_floats() const {
+            assert(format == EFormat::PositionNormal1 || format == EFormat::PositionNormal3);
+            return position_size_floats();
+        }
         size_t normal_offset_bytes() const { return normal_offset_floats() * sizeof(float); }
 
         size_t normal_size_floats() const {
@@ -92,6 +99,63 @@ class GCodeViewer
             }
         }
         size_t normal_size_bytes() const { return normal_size_floats() * sizeof(float); }
+
+        void reset();
+    };
+
+    // buffer containing instances data used to render a toolpaths using instanced or batched models
+    // instance record format:
+    // instanced models: 5 floats -> position.x|position.y|position.z|width|height (which are sent to the shader as -> vec3 (offset) + vec2 (scales) in GLModel::render_instanced())
+    // batched models:   3 floats -> position.x|position.y|position.z
+    struct InstanceVBuffer
+    {
+        // ranges used to render only subparts of the intances
+        struct Ranges
+        {
+            struct Range
+            {
+                // offset in bytes of the 1st instance to render
+                unsigned int offset;
+                // count of instances to render
+                unsigned int count;
+                // vbo id
+                unsigned int vbo{ 0 };
+                // Color to apply to the instances
+                Color color;
+            };
+
+            std::vector<Range> ranges;
+
+            void reset();
+        };
+
+        enum class EFormat : unsigned char
+        {
+            InstancedModel,
+            BatchedModel
+        };
+
+        EFormat format;
+
+        // cpu-side buffer containing all instances data
+        InstanceBuffer buffer;
+        // indices of the moves for all instances
+        std::vector<size_t> s_ids;
+        // position offsets, used to show the correct value of the tool position
+        InstancesOffsets offsets;
+        Ranges render_ranges;
+
+        size_t data_size_bytes() const { return s_ids.size() * instance_size_bytes(); }
+
+        size_t instance_size_floats() const {
+            switch (format)
+            {
+            case EFormat::InstancedModel: { return 5; }
+            case EFormat::BatchedModel: { return 3; }
+            default: { return 0; }
+            }
+        }
+        size_t instance_size_bytes() const { return instance_size_floats() * sizeof(float); }
 
         void reset();
     };
@@ -149,7 +213,7 @@ class GCodeViewer
         unsigned char cp_color_id{ 0 };
         std::vector<Sub_Path> sub_paths;
 
-        bool matches(const GCodeProcessor::MoveVertex& move) const;
+        bool matches(const GCodeProcessorResult::MoveVertex& move) const;
         size_t vertices_count() const {
             return sub_paths.empty() ? 0 : sub_paths.back().last.s_id - sub_paths.front().first.s_id + 1;
         }
@@ -167,7 +231,7 @@ class GCodeViewer
                 return -1;
             }
         }
-        void add_sub_path(const GCodeProcessor::MoveVertex& move, unsigned int b_id, size_t i_id, size_t s_id) {
+        void add_sub_path(const GCodeProcessorResult::MoveVertex& move, unsigned int b_id, size_t i_id, size_t s_id) {
             Endpoint endpoint = { b_id, i_id, s_id, move.position };
             sub_paths.push_back({ endpoint , endpoint });
         }
@@ -195,14 +259,6 @@ class GCodeViewer
             return false;
         }
     };
-//    // for unordered_set implementation of render_paths
-//    struct RenderPathPropertyHash {
-//        size_t operator() (const RenderPath &p) const {
-//            // Convert the RGB value to an integer hash.
-////            return (size_t(int(p.color[0] * 255) + 255 * int(p.color[1] * 255) + (255 * 255) * int(p.color[2] * 255)) * 7919) ^ size_t(p.ibuffer_id);
-//            return size_t(int(p.color[0] * 255) + 255 * int(p.color[1] * 255) + (255 * 255) * int(p.color[2] * 255)) ^ size_t(p.ibuffer_id);
-//        }
-//    };
     struct RenderPathPropertyLower {
         bool operator() (const RenderPath &l, const RenderPath &r) const {
             if (l.tbuffer_id < r.tbuffer_id)
@@ -229,18 +285,33 @@ class GCodeViewer
         {
             Point,
             Line,
-            Triangle
+            Triangle,
+            InstancedModel,
+            BatchedModel
         };
 
         ERenderPrimitiveType render_primitive_type;
+
+        // buffers for point, line and triangle primitive types
         VBuffer vertices;
         std::vector<IBuffer> indices;
 
+        struct Model
+        {
+            GLModel model;
+            Color color;
+            InstanceVBuffer instances;
+            GLModel::InitializationData data;
+
+            void reset();
+        };
+
+        // contain the buffer for model primitive types
+        Model model;
+
         std::string shader;
         std::vector<Path> paths;
-        // std::set seems to perform significantly better, at least on Windows.
-//        std::unordered_set<RenderPath, RenderPathPropertyHash, RenderPathPropertyEqual> render_paths;
-        std::set<RenderPath, RenderPathPropertyLower> render_paths;
+        std::vector<RenderPath> render_paths;
         bool visible{ false };
 
         void reset();
@@ -248,7 +319,7 @@ class GCodeViewer
         // b_id index of buffer contained in this->indices
         // i_id index of first index contained in this->indices[b_id]
         // s_id index of first vertex contained in this->vertices
-        void add_path(const GCodeProcessor::MoveVertex& move, unsigned int b_id, size_t i_id, size_t s_id);
+        void add_path(const GCodeProcessorResult::MoveVertex& move, unsigned int b_id, size_t i_id, size_t s_id);
 
         unsigned int max_vertices_per_segment() const {
             switch (render_primitive_type)
@@ -284,7 +355,20 @@ class GCodeViewer
         size_t max_indices_per_segment_size_bytes() const { return max_indices_per_segment() * sizeof(IBufferType); }
 
         bool has_data() const {
-            return !vertices.vbos.empty() && vertices.vbos.front() != 0 && !indices.empty() && indices.front().ibo != 0;
+            switch (render_primitive_type)
+            {
+            case ERenderPrimitiveType::Point:
+            case ERenderPrimitiveType::Line:
+            case ERenderPrimitiveType::Triangle: {
+                return !vertices.vbos.empty() && vertices.vbos.front() != 0 && !indices.empty() && indices.front().ibo != 0;
+            }
+            case ERenderPrimitiveType::InstancedModel: { return model.model.is_initialized() && !model.instances.buffer.empty(); }
+            case ERenderPrimitiveType::BatchedModel: {
+                return model.data.vertices_count() > 0 && model.data.indices_count() &&
+                    !vertices.vbos.empty() && vertices.vbos.front() != 0 && !indices.empty() && indices.front().ibo != 0;
+            }
+            default: { return false; }
+            }
         }
     };
 
@@ -433,18 +517,24 @@ class GCodeViewer
         int64_t gl_multi_lines_calls_count{ 0 };
         int64_t gl_multi_triangles_calls_count{ 0 };
         int64_t gl_triangles_calls_count{ 0 };
+        int64_t gl_instanced_models_calls_count{ 0 };
+        int64_t gl_batched_models_calls_count{ 0 };
         // memory
         int64_t results_size{ 0 };
         int64_t total_vertices_gpu_size{ 0 };
         int64_t total_indices_gpu_size{ 0 };
+        int64_t total_instances_gpu_size{ 0 };
         int64_t max_vbuffer_gpu_size{ 0 };
         int64_t max_ibuffer_gpu_size{ 0 };
         int64_t paths_size{ 0 };
         int64_t render_paths_size{ 0 };
+        int64_t models_instances_size{ 0 };
         // other
         int64_t travel_segments_count{ 0 };
         int64_t wipe_segments_count{ 0 };
         int64_t extrude_segments_count{ 0 };
+        int64_t instances_count{ 0 };
+        int64_t batched_count{ 0 };
         int64_t vbuffers_count{ 0 };
         int64_t ibuffers_count{ 0 };
 
@@ -470,22 +560,28 @@ class GCodeViewer
             gl_multi_lines_calls_count = 0;
             gl_multi_triangles_calls_count = 0;
             gl_triangles_calls_count = 0;
+            gl_instanced_models_calls_count = 0;
+            gl_batched_models_calls_count = 0;
         }
 
         void reset_sizes() {
             results_size = 0;
             total_vertices_gpu_size = 0;
             total_indices_gpu_size = 0;
+            total_instances_gpu_size = 0;
             max_vbuffer_gpu_size = 0;
             max_ibuffer_gpu_size = 0;
             paths_size = 0;
             render_paths_size = 0;
+            models_instances_size = 0;
         }
 
         void reset_others() {
             travel_segments_count = 0;
             wipe_segments_count = 0;
-            extrude_segments_count =  0;
+            extrude_segments_count = 0;
+            instances_count = 0;
+            batched_count = 0;
             vbuffers_count = 0;
             ibuffers_count = 0;
         }
@@ -500,6 +596,10 @@ public:
             GLModel m_model;
             Vec3f m_world_position;
             Transform3f m_world_transform;
+            // for seams, the position of the marker is on the last endpoint of the toolpath containing it
+            // the offset is used to show the correct value of tool position in the "ToolPosition" window
+            // see implementation of render() method
+            Vec3f m_world_offset;
             float m_z_offset{ 0.5f };
             bool m_visible{ true };
 
@@ -509,6 +609,7 @@ public:
             const BoundingBoxf3& get_bounding_box() const { return m_model.get_bounding_box(); }
 
             void set_world_position(const Vec3f& position);
+            void set_world_offset(const Vec3f& offset) { m_world_offset = offset; }
 
             bool is_visible() const { return m_visible; }
             void set_visible(bool visible) { m_visible = visible; }
@@ -530,18 +631,17 @@ public:
             std::string m_filename;
             boost::iostreams::mapped_file_source m_file;
             // map for accessing data in file by line number
-            std::vector<std::pair<uint64_t, uint64_t>> m_lines_map;
+            std::vector<size_t> m_lines_ends;
             // current visible lines
             std::vector<Line> m_lines;
 
         public:
             GCodeWindow() = default;
             ~GCodeWindow() { stop_mapping_file(); }
-            void set_filename(const std::string& filename) { m_filename = filename; }
-            void load_gcode();
+            void load_gcode(const std::string& filename, std::vector<size_t> &&lines_ends);
             void reset() {
                 stop_mapping_file();
-                m_lines_map.clear();
+                m_lines_ends.clear();
                 m_lines.clear();
                 m_filename.clear();
             }
@@ -563,7 +663,9 @@ public:
         Endpoints endpoints;
         Endpoints current;
         Endpoints last_current;
+        Endpoints global;
         Vec3f current_position{ Vec3f::Zero() };
+        Vec3f current_offset{ Vec3f::Zero() };
         Marker marker;
         GCodeWindow gcode_window;
         std::vector<unsigned int> gcode_ids;
@@ -594,6 +696,7 @@ private:
     BoundingBoxf3 m_paths_bounding_box;
     // bounding box of toolpaths + marker tools
     BoundingBoxf3 m_max_bounding_box;
+    float m_max_print_height{ 0.0f };
     std::vector<Color> m_tool_colors;
     Layers m_layers;
     std::array<unsigned int, 2> m_layers_z_range;
@@ -613,26 +716,28 @@ private:
     Statistics m_statistics;
 #endif // ENABLE_GCODE_VIEWER_STATISTICS
     std::array<float, 2> m_detected_point_sizes = { 0.0f, 0.0f };
-    GCodeProcessor::Result::SettingsIds m_settings_ids;
+    GCodeProcessorResult::SettingsIds m_settings_ids;
     std::array<SequentialRangeCap, 2> m_sequential_range_caps;
 
-#if ENABLE_FIX_IMPORTING_COLOR_PRINT_VIEW_INTO_GCODEVIEWER
     std::vector<CustomGCode::Item> m_custom_gcode_per_print_z;
-#endif // ENABLE_FIX_IMPORTING_COLOR_PRINT_VIEW_INTO_GCODEVIEWER
+
+    bool m_contained_in_bed{ true };
 
 public:
     GCodeViewer();
     ~GCodeViewer() { reset(); }
 
+    void init();
+
     // extract rendering data from the given parameters
-    void load(const GCodeProcessor::Result& gcode_result, const Print& print, bool initialized);
+    void load(const GCodeProcessorResult& gcode_result, const Print& print, bool initialized);
     // recalculate ranges in dependence of what is visible and sets tool/print colors
-    void refresh(const GCodeProcessor::Result& gcode_result, const std::vector<std::string>& str_tool_colors);
+    void refresh(const GCodeProcessorResult& gcode_result, const std::vector<std::string>& str_tool_colors);
     void refresh_render_paths();
     void update_shells_color_by_extruder(const DynamicPrintConfig* config);
 
     void reset();
-    void render() const;
+    void render();
 
     bool has_data() const { return !m_roles.empty(); }
     bool can_export_toolpaths() const;
@@ -643,6 +748,8 @@ public:
 
     const SequentialView& get_sequential_view() const { return m_sequential_view; }
     void update_sequential_view_current(unsigned int first, unsigned int last);
+
+    bool is_contained_in_bed() const { return m_contained_in_bed; }
 
     EViewType get_view_type() const { return m_view_type; }
     void set_view_type(EViewType type) {
@@ -665,30 +772,27 @@ public:
 
     void export_toolpaths_to_obj(const char* filename) const;
 
-    void start_mapping_gcode_window();
-    void stop_mapping_gcode_window();
     void toggle_gcode_window_visibility() { m_sequential_view.gcode_window.toggle_visibility(); }
 
-#if ENABLE_FIX_IMPORTING_COLOR_PRINT_VIEW_INTO_GCODEVIEWER
     std::vector<CustomGCode::Item>& get_custom_gcode_per_print_z() { return m_custom_gcode_per_print_z; }
     size_t get_extruders_count() { return m_extruders_count; }
-#endif // ENABLE_FIX_IMPORTING_COLOR_PRINT_VIEW_INTO_GCODEVIEWER
 
 private:
-    void load_toolpaths(const GCodeProcessor::Result& gcode_result);
+    void load_toolpaths(const GCodeProcessorResult& gcode_result);
     void load_shells(const Print& print, bool initialized);
     void refresh_render_paths(bool keep_sequential_current_first, bool keep_sequential_current_last) const;
-    void render_toolpaths() const;
-    void render_shells() const;
-    void render_legend(float& legend_height) const;
+    void render_toolpaths();
+    void render_shells();
+    void render_legend(float& legend_height);
 #if ENABLE_GCODE_VIEWER_STATISTICS
-    void render_statistics() const;
+    void render_statistics();
 #endif // ENABLE_GCODE_VIEWER_STATISTICS
     bool is_visible(ExtrusionRole role) const {
         return role < erCount && (m_extrusions.role_visibility_flags & (1 << role)) != 0;
     }
     bool is_visible(const Path& path) const { return is_visible(path.role); }
     void log_memory_used(const std::string& label, int64_t additional = 0) const;
+    Color option_color(EMoveType move_type) const;
 };
 
 } // namespace GUI

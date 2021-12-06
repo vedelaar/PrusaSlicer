@@ -30,11 +30,8 @@ public:
 
     ClippingPlane(const Vec3d& direction, double offset)
     {
-        Vec3d norm_dir = direction.normalized();
-        m_data[0] = norm_dir(0);
-        m_data[1] = norm_dir(1);
-        m_data[2] = norm_dir(2);
-        m_data[3] = offset;
+        set_normal(direction);
+        set_offset(offset);
     }
 
     bool operator==(const ClippingPlane& cp) const {
@@ -48,8 +45,15 @@ public:
     }
 
     bool is_point_clipped(const Vec3d& point) const { return distance(point) < 0.; }
-    void set_normal(const Vec3d& normal) { for (size_t i=0; i<3; ++i) m_data[i] = normal(i); }
+    void set_normal(const Vec3d& normal)
+    {
+        const Vec3d norm_dir = normal.normalized();
+        m_data[0] = norm_dir.x();
+        m_data[1] = norm_dir.y();
+        m_data[2] = norm_dir.z();
+    }
     void set_offset(double offset) { m_data[3] = offset; }
+    double get_offset() const { return m_data[3]; }
     Vec3d get_normal() const { return Vec3d(m_data[0], m_data[1], m_data[2]); }
     bool is_active() const { return m_data[3] != DBL_MAX; }
     static ClippingPlane ClipsNothing() { return ClippingPlane(Vec3d(0., 0., 1.), DBL_MAX); }
@@ -112,11 +116,9 @@ public:
     // The class references extern TriangleMesh, which must stay alive
     // during MeshRaycaster existence.
     MeshRaycaster(const TriangleMesh& mesh)
-        : m_emesh(mesh)
+        : m_emesh(mesh, true) // calculate epsilon for triangle-ray intersection from an average edge length
+        , m_normals(its_face_normals(mesh.its))
     {
-        m_normals.reserve(mesh.stl.facet_start.size());
-        for (const stl_facet& facet : mesh.stl.facet_start)
-            m_normals.push_back(facet.normal);
     }
 
     void line_from_mouse_pos(const Vec2d& mouse_pos, const Transform3d& trafo, const Camera& camera,
@@ -148,6 +150,9 @@ public:
     // normal* can be used to also get normal of the respective triangle.
 
     Vec3f get_closest_point(const Vec3f& point, Vec3f* normal = nullptr) const;
+
+    // Given a point in mesh coords, the method returns the closest facet from mesh.
+    int get_closest_facet(const Vec3f &point) const;
 
     Vec3f get_triangle_normal(size_t facet_idx) const;
 

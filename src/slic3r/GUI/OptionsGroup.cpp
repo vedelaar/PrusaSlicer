@@ -3,6 +3,8 @@
 #include "Plater.hpp"
 #include "GUI_App.hpp"
 #include "OG_CustomCtrl.hpp"
+#include "MsgDialog.hpp"
+#include "format.hpp"
 
 #include <utility>
 #include <wx/numformatter.h>
@@ -10,6 +12,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include "libslic3r/Exception.hpp"
 #include "libslic3r/Utils.hpp"
+#include "libslic3r/AppConfig.hpp"
 #include "I18N.hpp"
 
 namespace Slic3r { namespace GUI {
@@ -126,6 +129,12 @@ bool OptionsGroup::is_legend_line()
 	return false;
 }
 
+void OptionsGroup::set_max_win_width(int max_win_width)
+{
+    if (custom_ctrl)
+        custom_ctrl->set_max_win_width(max_win_width);
+}
+
 void OptionsGroup::show_field(const t_config_option_key& opt_key, bool show/* = true*/)
 {
     Field* field = get_field(opt_key);
@@ -185,9 +194,17 @@ void OptionsGroup::append_line(const Line& line)
         m_options_mode.push_back(option_set[0].opt.mode);
 }
 
+void OptionsGroup::append_separator()
+{
+    m_lines.emplace_back(Line());
+}
+
 void OptionsGroup::activate_line(Line& line)
 {
-	m_use_custom_ctrl_as_parent = false;
+    if (line.is_separator())
+        return;
+
+    m_use_custom_ctrl_as_parent = false;
 
 	if (line.full_width && (
 		line.widget != nullptr ||
@@ -396,7 +413,7 @@ void OptionsGroup::activate_line(Line& line)
 }
 
 // create all controls for the option group from the m_lines
-bool OptionsGroup::activate(std::function<void()> throw_if_canceled)
+bool OptionsGroup::activate(std::function<void()> throw_if_canceled/* = [](){}*/, int horiz_alignment/* = wxALIGN_LEFT*/)
 {
 	if (sizer)//(!sizer->IsEmpty())
 		return false;
@@ -436,6 +453,10 @@ bool OptionsGroup::activate(std::function<void()> throw_if_canceled)
 			throw_if_canceled();
 			activate_line(line);
 		}
+
+        ctrl_horiz_alignment = horiz_alignment;
+        if (custom_ctrl)
+            custom_ctrl->init_max_win_width();
 	} catch (UIBuildCanceled&) {
 		auto p = sizer;
 		this->clear();
@@ -486,7 +507,7 @@ void OptionsGroup::clear(bool destroy_custom_ctrl)
 	m_fields.clear();
 }
 
-Line OptionsGroup::create_single_option_line(const Option& option, const wxString& path/* = wxEmptyString*/) const {
+Line OptionsGroup::create_single_option_line(const Option& option, const std::string& path/* = std::string()*/) const {
 // 	Line retval{ _(option.opt.label), _(option.opt.tooltip) };
     wxString tooltip = _(option.opt.tooltip);
     edit_tooltip(tooltip);
@@ -852,7 +873,7 @@ boost::any ConfigOptionsGroup::get_config_value(const DynamicPrintConfig& config
 		}
 		break;
 	case coString:
-		ret = static_cast<wxString>(config.opt_string(opt_key));
+		ret = from_u8(config.opt_string(opt_key));
 		break;
 	case coStrings:
 		if (opt_key == "compatible_printers" || opt_key == "compatible_prints") {
@@ -873,7 +894,7 @@ boost::any ConfigOptionsGroup::get_config_value(const DynamicPrintConfig& config
 			ret = text_value;
 		}
 		else
-			ret = static_cast<wxString>(config.opt_string(opt_key, static_cast<unsigned int>(idx)));
+			ret = from_u8(config.opt_string(opt_key, static_cast<unsigned int>(idx)));
 		break;
 	case coBool:
 		ret = config.opt_bool(opt_key);
@@ -944,6 +965,54 @@ void ConfigOptionsGroup::change_opt_value(const t_config_option_key& opt_key, co
 		m_modelconfig->touch();
 }
 
+wxString OptionsGroup::get_url(const std::string& path_end)
+{
+    if (path_end.empty())
+        return wxEmptyString;
+
+    wxString language = get_app_config()->get("translation_language");
+    wxString lang_marker = language.IsEmpty() ? "en" : language.BeforeFirst('_');
+
+    return wxString("https://help.prusa3d.com/") + lang_marker + wxString("/article/" + path_end);
+}
+
+bool OptionsGroup::launch_browser(const std::string& path_end)
+{
+    bool launch = true;
+
+    if (get_app_config()->get("suppress_hyperlinks").empty()) {
+        RichMessageDialog dialog(nullptr, _L("Open hyperlink in default browser?"), _L("PrusaSlicer: Open hyperlink"), wxYES_NO);
+        dialog.ShowCheckBox(_L("Remember my choice"));
+        int answer = dialog.ShowModal();
+
+        if (dialog.IsCheckBoxChecked()) {
+            wxString preferences_item = _L("Suppress to open hyperlink in browser");
+            wxString msg =
+                _L("PrusaSlicer will remember your choice.") + "\n\n" +
+                _L("You will not be asked about it again on label hovering.") + "\n\n" +
+                format_wxstr(_L("Visit \"Preferences\" and check \"%1%\"\nto changes your choice."), preferences_item);
+
+            MessageDialog msg_dlg(nullptr, msg, _L("PrusaSlicer: Don't ask me again"), wxOK | wxCANCEL | wxICON_INFORMATION);
+            if (msg_dlg.ShowModal() == wxID_CANCEL)
+                return false;
+
+            get_app_config()->set("suppress_hyperlinks", dialog.IsCheckBoxChecked() ? (answer == wxID_NO ? "1" : "0") : "");
+        }
+
+        launch = answer == wxID_YES;
+    }
+    if (launch)
+        launch = get_app_config()->get("suppress_hyperlinks") != "1";
+
+    return launch && wxLaunchDefaultBrowser(OptionsGroup::get_url(path_end));
+}
+
+
+
+//-------------------------------------------------------------------------------------------
+// ogStaticText
+//-------------------------------------------------------------------------------------------
+
 ogStaticText::ogStaticText(wxWindow* parent, const wxString& text) :
     wxStaticText(parent, wxID_ANY, text, wxDefaultPosition, wxDefaultSize)
 {
@@ -959,6 +1028,39 @@ void ogStaticText::SetText(const wxString& value, bool wrap/* = true*/)
 	SetLabel(value);
     if (wrap) Wrap(60 * wxGetApp().em_unit());
 	GetParent()->Layout();
+}
+
+void ogStaticText::SetPathEnd(const std::string& link)
+{
+    Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& event) {
+        if (HasCapture())
+            return;
+        this->CaptureMouse();
+        event.Skip();
+    } );
+    Bind(wxEVT_LEFT_UP, [link, this](wxMouseEvent& event) {
+        if (!HasCapture())
+            return;
+        ReleaseMouse();
+        OptionsGroup::launch_browser(link);
+        event.Skip();
+    } );
+    Bind(wxEVT_ENTER_WINDOW, [this, link](wxMouseEvent& event) {
+        SetToolTip(OptionsGroup::get_url(get_app_config()->get("suppress_hyperlinks") != "1" ? link : std::string()));
+        FocusText(true); 
+        event.Skip(); 
+    });
+    Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent& event) { FocusText(false); event.Skip(); });
+}
+
+void ogStaticText::FocusText(bool focus)
+{
+    if (get_app_config()->get("suppress_hyperlinks") == "1")
+        return;
+
+    SetFont(focus ? Slic3r::GUI::wxGetApp().link_font() :
+                    Slic3r::GUI::wxGetApp().normal_font());
+    Refresh();
 }
 
 } // GUI

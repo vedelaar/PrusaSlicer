@@ -28,17 +28,6 @@ static wxSize get_bitmap_size(const wxBitmap& bmp)
 #endif
 }
 
-static wxString get_url(const wxString& path_end, bool get_default = false) 
-{
-    if (path_end.IsEmpty())
-        return wxEmptyString;
-
-    wxString language = wxGetApp().app_config->get("translation_language");
-    wxString lang_marker = language.IsEmpty() ? "en" : language.BeforeFirst('_');
-
-    return wxString("https://help.prusa3d.com/") + lang_marker + "/article/" + path_end;
-}
-
 OG_CustomCtrl::OG_CustomCtrl(   wxWindow*            parent,
                                 OptionsGroup*        og,
                                 const wxPoint&       pos /* = wxDefaultPosition*/,
@@ -72,6 +61,11 @@ void OG_CustomCtrl::init_ctrl_lines()
     const std::vector<Line>& og_lines = opt_group->get_lines();
     for (const Line& line : og_lines)
     {
+        if (line.is_separator()) {
+            ctrl_lines.emplace_back(CtrlLine(0, this, line));
+            continue;
+        }
+
         if (line.full_width && (
             // description line
             line.widget != nullptr ||
@@ -124,6 +118,15 @@ wxPoint OG_CustomCtrl::get_pos(const Line& line, Field* field_in/* = nullptr*/)
             line_height = win_height;
     };
 
+    auto correct_horiz_pos = [this](int& h_pos, Field* field) {
+        if (m_max_win_width > 0 && field->getWindow()) {
+            int win_width = field->getWindow()->GetSize().GetWidth();
+            if (dynamic_cast<CheckBox*>(field))
+                win_width *= 0.5;
+            h_pos += m_max_win_width - win_width;
+        }
+    };
+
     for (CtrlLine& ctrl_line : ctrl_lines) {
         if (&ctrl_line.og_line == &line)
         {
@@ -160,6 +163,7 @@ wxPoint OG_CustomCtrl::get_pos(const Line& line, Field* field_in/* = nullptr*/)
                 h_pos += 3 * blinking_button_width;
                 Field* field = opt_group->get_field(option_set.front().opt_id);
                 correct_line_height(ctrl_line.height, field->getWindow());
+                correct_horiz_pos(h_pos, field);
                 break;
             }
 
@@ -189,8 +193,10 @@ wxPoint OG_CustomCtrl::get_pos(const Line& line, Field* field_in/* = nullptr*/)
                 }                
                 h_pos += (opt.opt.gui_type == ConfigOptionDef::GUIType::legend ? 1 : 3) * blinking_button_width;
                 
-                if (field == field_in)
+                if (field == field_in) {
+                    correct_horiz_pos(h_pos, field);
                     break;
+                }
                 if (opt.opt.gui_type == ConfigOptionDef::GUIType::legend)
                     h_pos += 2 * blinking_button_width;
 
@@ -247,7 +253,7 @@ void OG_CustomCtrl::OnMotion(wxMouseEvent& event)
         line.is_focused = is_point_in_rect(pos, line.rect_label);
         if (line.is_focused) {
             if (!suppress_hyperlinks && !line.og_line.label_path.empty())
-                tooltip = get_url(line.og_line.label_path) +"\n\n";
+                tooltip = OptionsGroup::get_url(line.og_line.label_path) +"\n\n";
             tooltip += line.og_line.label_tooltip;
             break;
         }
@@ -361,6 +367,28 @@ void OG_CustomCtrl::correct_widgets_position(wxSizer* widget, const Line& line, 
         }
 };
 
+void OG_CustomCtrl::init_max_win_width()
+{
+    if (opt_group->ctrl_horiz_alignment == wxALIGN_RIGHT && m_max_win_width == 0)
+        for (CtrlLine& line : ctrl_lines) {
+            if (int max_win_width = line.get_max_win_width();
+                m_max_win_width < max_win_width)
+                m_max_win_width = max_win_width;
+        }
+}
+
+void OG_CustomCtrl::set_max_win_width(int max_win_width)
+{
+    if (m_max_win_width == max_win_width)
+        return;
+    m_max_win_width = max_win_width;
+    for (CtrlLine& line : ctrl_lines)
+        line.correct_items_positions();
+
+    GetParent()->Layout();
+}
+
+
 void OG_CustomCtrl::msw_rescale()
 {
 #ifdef __WXOSX__
@@ -373,6 +401,8 @@ void OG_CustomCtrl::msw_rescale()
 
     m_bmp_mode_sz = create_scaled_bitmap("mode_simple", this, wxOSX ? 10 : 12).GetSize();
     m_bmp_blinking_sz = create_scaled_bitmap("search_blink", this).GetSize();
+
+    m_max_win_width = 0;
 
     wxCoord    v_pos = 0;
     for (CtrlLine& line : ctrl_lines) {
@@ -405,6 +435,21 @@ OG_CustomCtrl::CtrlLine::CtrlLine(  wxCoord         height,
         rects_undo_icon.emplace_back(wxRect());
         rects_undo_to_sys_icon.emplace_back(wxRect());
     }
+}
+
+int OG_CustomCtrl::CtrlLine::get_max_win_width()
+{
+    int max_win_width = 0;
+    if (!draw_just_act_buttons) {
+        const std::vector<Option>& option_set = og_line.get_options();
+        for (auto opt : option_set) {
+            Field* field = ctrl->opt_group->get_field(opt.opt_id);
+            if (field && field->getWindow())
+                max_win_width = field->getWindow()->GetSize().GetWidth();
+        }
+    }
+
+    return max_win_width;
 }
 
 void OG_CustomCtrl::CtrlLine::correct_items_positions()
@@ -447,6 +492,8 @@ void OG_CustomCtrl::CtrlLine::msw_rescale()
 
 void OG_CustomCtrl::CtrlLine::update_visibility(ConfigOptionMode mode)
 {
+    if (og_line.is_separator())
+        return;
     const std::vector<Option>& option_set = og_line.get_options();
 
     const ConfigOptionMode& line_mode = option_set.front().opt.mode;
@@ -480,8 +527,25 @@ void OG_CustomCtrl::CtrlLine::update_visibility(ConfigOptionMode mode)
     correct_items_positions();
 }
 
+void OG_CustomCtrl::CtrlLine::render_separator(wxDC& dc, wxCoord v_pos)
+{
+    wxPoint begin(ctrl->m_h_gap, v_pos);
+    wxPoint end(ctrl->GetSize().GetWidth() - ctrl->m_h_gap, v_pos);
+
+    wxPen pen, old_pen = pen = dc.GetPen();
+    pen.SetColour(*wxLIGHT_GREY);
+    dc.SetPen(pen);
+    dc.DrawLine(begin, end);
+    dc.SetPen(old_pen);
+}
+
 void OG_CustomCtrl::CtrlLine::render(wxDC& dc, wxCoord v_pos)
 {
+    if (is_separator()) {
+        render_separator(dc, v_pos);
+        return;
+    }
+
     Field* field = ctrl->opt_group->get_field(og_line.get_options().front().opt_id);
 
     bool suppress_hyperlinks = get_app_config()->get("suppress_hyperlinks") == "1";
@@ -502,7 +566,7 @@ void OG_CustomCtrl::CtrlLine::render(wxDC& dc, wxCoord v_pos)
     bool is_url_string = false;
     if (ctrl->opt_group->label_width != 0 && !label.IsEmpty()) {
         const wxColour* text_clr = (option_set.size() == 1 && field ? field->label_color() : og_line.full_Label_color);
-        is_url_string = !suppress_hyperlinks && !og_line.label_path.IsEmpty();
+        is_url_string = !suppress_hyperlinks && !og_line.label_path.empty();
         h_pos = draw_text(dc, wxPoint(h_pos, v_pos), label + ":", text_clr, ctrl->opt_group->label_width * ctrl->m_em_unit, is_url_string);
     }
 
@@ -522,6 +586,8 @@ void OG_CustomCtrl::CtrlLine::render(wxDC& dc, wxCoord v_pos)
     {
         if (field && field->undo_to_sys_bitmap())
             h_pos = draw_act_bmps(dc, wxPoint(h_pos, v_pos), field->undo_to_sys_bitmap()->bmp(), field->undo_bitmap()->bmp(), field->blink()) + ctrl->m_h_gap;
+        else if (field && !field->undo_to_sys_bitmap() && field->blink()) 
+            draw_blinking_bmp(dc, wxPoint(h_pos, v_pos), field->blink());
         // update width for full_width fields
         if (option_set.front().opt.full_width && field->getWindow())
             field->getWindow()->SetSize(ctrl->GetSize().x - h_pos, -1);
@@ -542,7 +608,7 @@ void OG_CustomCtrl::CtrlLine::render(wxDC& dc, wxCoord v_pos)
             if (is_url_string)
                 is_url_string = false;
             else if(opt == option_set.front())
-                is_url_string = !suppress_hyperlinks && !og_line.label_path.IsEmpty();
+                is_url_string = !suppress_hyperlinks && !og_line.label_path.empty();
             h_pos = draw_text(dc, wxPoint(h_pos, v_pos), label, field ? field->label_color() : nullptr, ctrl->opt_group->sublabel_width * ctrl->m_em_unit, is_url_string);
         }
 
@@ -689,71 +755,10 @@ wxCoord OG_CustomCtrl::CtrlLine::draw_act_bmps(wxDC& dc, wxPoint pos, const wxBi
 
 bool OG_CustomCtrl::CtrlLine::launch_browser() const
 {
-    if (!is_focused || og_line.label_path.IsEmpty())
+    if (!is_focused || og_line.label_path.empty())
         return false;
 
-    bool launch = true;
-
-    if (get_app_config()->get("suppress_hyperlinks").empty()) {
-        RememberChoiceDialog dialog(nullptr, _L("Should we open this hyperlink in your default browser?"), _L("PrusaSlicer: Open hyperlink"));
-        int answer = dialog.ShowModal();
-        launch = answer == wxID_YES;
-
-        get_app_config()->set("suppress_hyperlinks", dialog.remember_choice() ? (answer == wxID_NO ? "1" : "0") : "");
-    }
-    if (launch)
-        launch = get_app_config()->get("suppress_hyperlinks") != "1";
-
-    return  launch && wxLaunchDefaultBrowser(get_url(og_line.label_path));
-}
-
-
-RememberChoiceDialog::RememberChoiceDialog(wxWindow* parent, const wxString& msg_text, const wxString& caption)
-    : wxDialog(parent, wxID_ANY, caption, wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxICON_INFORMATION)
-{
-    this->SetEscapeId(wxID_CLOSE);
-
-    wxBoxSizer* topSizer = new wxBoxSizer(wxVERTICAL);
-
-    m_remember_choice = new wxCheckBox(this, wxID_ANY, _L("Remember my choice"));
-    m_remember_choice->SetValue(false);
-    m_remember_choice->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& evt)
-        {
-            if (!evt.IsChecked())
-                return;
-            wxString preferences_item = _L("Suppress to open hyperlink in browser");
-            wxString msg =
-                _L("PrusaSlicer will remember your choice.") + "\n\n" +
-                _L("You will not be asked about it again on label hovering.") + "\n\n" +
-                format_wxstr(_L("Visit \"Preferences\" and check \"%1%\"\nto changes your choice."), preferences_item);
-
-            //wxMessageDialog dialog(nullptr, msg, _L("PrusaSlicer: Don't ask me again"), wxOK | wxCANCEL | wxICON_INFORMATION);
-            MessageDialog dialog(nullptr, msg, _L("PrusaSlicer: Don't ask me again"), wxOK | wxCANCEL | wxICON_INFORMATION);
-            if (dialog.ShowModal() == wxID_CANCEL)
-                m_remember_choice->SetValue(false);
-        });
-
-
-    // Add dialog's buttons
-    wxStdDialogButtonSizer* btns = this->CreateStdDialogButtonSizer(wxYES | wxNO);
-    wxButton* btnYES = static_cast<wxButton*>(this->FindWindowById(wxID_YES, this));
-    wxButton* btnNO = static_cast<wxButton*>(this->FindWindowById(wxID_NO, this));
-    btnYES->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { this->EndModal(wxID_YES); });
-    btnNO->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { this->EndModal(wxID_NO); });
-
-    topSizer->Add(new wxStaticText(this, wxID_ANY, msg_text), 0, wxEXPAND | wxALL, 10);
-    topSizer->Add(m_remember_choice, 0, wxEXPAND | wxALL, 10);
-    topSizer->Add(btns, 0, wxEXPAND | wxALL, 10);
-
-#ifdef _WIN32
-    wxGetApp().UpdateDlgDarkUI(this);
-#else
-    this->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
-#endif
-    this->SetSizer(topSizer);
-    topSizer->SetSizeHints(this);
-
-    this->CenterOnScreen();
+    return OptionsGroup::launch_browser(og_line.label_path);
 }
 
 } // GUI

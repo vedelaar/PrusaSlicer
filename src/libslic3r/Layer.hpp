@@ -148,7 +148,8 @@ public:
         return false;
     }
     void                    make_perimeters();
-    void                    make_fills() { this->make_fills(nullptr, nullptr); };
+    // Phony version of make_fills() without parameters for Perl integration only.
+    void                    make_fills() { this->make_fills(nullptr, nullptr); }
     void                    make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive::Octree* support_fill_octree);
     void 					make_ironing();
 
@@ -188,17 +189,23 @@ public:
     // Extrusion paths for the support base and for the support interface and contacts.
     ExtrusionEntityCollection   support_fills;
 
+
     // Is there any valid extrusion assigned to this LayerRegion?
     virtual bool                has_extrusions() const { return ! support_fills.empty(); }
+
+    // Zero based index of an interface layer, used for alternating direction of interface / contact layers.
+    size_t                      interface_id() const { return m_interface_id; }
 
 protected:
     friend class PrintObject;
 
     // The constructor has been made public to be able to insert additional support layers for the skirt or a wipe tower
     // between the raft and the object first layer.
-    SupportLayer(size_t id, PrintObject *object, coordf_t height, coordf_t print_z, coordf_t slice_z) :
-        Layer(id, object, height, print_z, slice_z) {}
+    SupportLayer(size_t id, size_t interface_id, PrintObject *object, coordf_t height, coordf_t print_z, coordf_t slice_z) :
+        Layer(id, object, height, print_z, slice_z), m_interface_id(interface_id) {}
     virtual ~SupportLayer() = default;
+
+    size_t m_interface_id;
 };
 
 template<typename LayerContainer>

@@ -8,6 +8,10 @@
 #include <boost/format.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/filesystem.hpp>
+#if ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
+#include <boost/algorithm/string/predicate.hpp>
+#include <boost/nowide/convert.hpp>
+#endif // ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
 
 #include <wx/string.h>
 #include <wx/event.h>
@@ -27,6 +31,7 @@
 #include "GUI.hpp"
 #include "I18N.hpp"
 #include "Search.hpp"
+#include "BitmapCache.hpp"
 
 #include "../Utils/MacDarkMode.hpp"
 #include "nanosvg/nanosvg.h"
@@ -48,6 +53,9 @@ static const std::map<const wchar_t, std::string> font_icons = {
     {ImGui::RightArrowHoverButton , "notification_right_hover"      },
     {ImGui::PreferencesButton      , "notification_preferences"      },
     {ImGui::PreferencesHoverButton , "notification_preferences_hover"},
+#if ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
+    {ImGui::SliderFloatEditBtnIcon, "edit_button"                    },
+#endif // ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
 };
 static const std::map<const wchar_t, std::string> font_icons_large = {
     {ImGui::CloseNotifButton        , "notification_close"              },
@@ -58,13 +66,15 @@ static const std::map<const wchar_t, std::string> font_icons_large = {
     {ImGui::ErrorMarker             , "notification_error"              },
     {ImGui::CancelButton            , "notification_cancel"             },
     {ImGui::CancelHoverButton       , "notification_cancel_hover"       },
-    {ImGui::SinkingObjectMarker     , "move"                            },
-    {ImGui::CustomSupportsMarker    , "fdm_supports"                    },
-    {ImGui::CustomSeamMarker        , "seam"                            },
-    {ImGui::MmuSegmentationMarker   , "mmu_segmentation"                },
-    {ImGui::VarLayerHeightMarker    , "layers"                          },
+//    {ImGui::SinkingObjectMarker     , "move"                            },
+//    {ImGui::CustomSupportsMarker    , "fdm_supports"                    },
+//    {ImGui::CustomSeamMarker        , "seam"                            },
+//    {ImGui::MmuSegmentationMarker   , "mmu_segmentation"                },
+//    {ImGui::VarLayerHeightMarker    , "layers"                          },
     {ImGui::DocumentationButton     , "notification_documentation"      },
     {ImGui::DocumentationHoverButton, "notification_documentation_hover"},
+    {ImGui::InfoMarker              , "notification_info"               },
+    
 };
 
 static const std::map<const wchar_t, std::string> font_icons_extra_large = {
@@ -82,14 +92,6 @@ const ImVec4 ImGuiWrapper::COL_BUTTON_HOVERED    = COL_ORANGE_LIGHT;
 const ImVec4 ImGuiWrapper::COL_BUTTON_ACTIVE     = ImGuiWrapper::COL_BUTTON_HOVERED;
 
 ImGuiWrapper::ImGuiWrapper()
-    : m_glyph_ranges(nullptr)
-    , m_font_cjk(false)
-    , m_font_size(18.0)
-    , m_font_texture(0)
-    , m_style_scaling(1.0)
-    , m_mouse_buttons(0)
-    , m_disabled(false)
-    , m_new_frame_open(false)
 {
     ImGui::CreateContext();
 
@@ -277,10 +279,10 @@ void ImGuiWrapper::render()
     m_new_frame_open = false;
 }
 
-ImVec2 ImGuiWrapper::calc_text_size(const wxString &text)
+ImVec2 ImGuiWrapper::calc_text_size(const wxString &text, float wrap_width) const
 {
     auto text_utf8 = into_u8(text);
-    ImVec2 size = ImGui::CalcTextSize(text_utf8.c_str());
+    ImVec2 size = ImGui::CalcTextSize(text_utf8.c_str(), NULL, false, wrap_width);
 
 /*#ifdef __linux__
     size.x *= m_style_scaling;
@@ -288,6 +290,29 @@ ImVec2 ImGuiWrapper::calc_text_size(const wxString &text)
 #endif*/
 
     return size;
+}
+
+ImVec2 ImGuiWrapper::calc_button_size(const wxString &text, const ImVec2 &button_size) const
+{
+    const ImVec2        text_size = this->calc_text_size(text);
+    const ImGuiContext &g         = *GImGui;
+    const ImGuiStyle   &style     = g.Style;
+
+    return ImGui::CalcItemSize(button_size, text_size.x + style.FramePadding.x * 2.0f, text_size.y + style.FramePadding.y * 2.0f);
+}
+
+ImVec2 ImGuiWrapper::get_item_spacing() const
+{
+    const ImGuiContext &g     = *GImGui;
+    const ImGuiStyle   &style = g.Style;
+    return style.ItemSpacing;
+}
+
+float ImGuiWrapper::get_slider_float_height() const
+{
+    const ImGuiContext& g = *GImGui;
+    const ImGuiStyle& style = g.Style;
+    return g.FontSize + style.FramePadding.y * 2.0f + style.ItemSpacing.y;
 }
 
 void ImGuiWrapper::set_next_window_pos(float x, float y, int flag, float pivot_x, float pivot_y)
@@ -356,7 +381,7 @@ bool ImGuiWrapper::image_button()
 
 bool ImGuiWrapper::input_double(const std::string &label, const double &value, const std::string &format)
 {
-    return ImGui::InputDouble(label.c_str(), const_cast<double*>(&value), 0.0f, 0.0f, format.c_str());
+    return ImGui::InputDouble(label.c_str(), const_cast<double*>(&value), 0.0f, 0.0f, format.c_str(), ImGuiInputTextFlags_CharsDecimal);
 }
 
 bool ImGuiWrapper::input_double(const wxString &label, const double &value, const std::string &format)
@@ -422,6 +447,114 @@ void ImGuiWrapper::text_colored(const ImVec4& color, const wxString& label)
     this->text_colored(color, label_utf8.c_str());
 }
 
+void ImGuiWrapper::text_wrapped(const char *label, float wrap_width)
+{
+    ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + wrap_width);
+    this->text(label);
+    ImGui::PopTextWrapPos();
+}
+
+void ImGuiWrapper::text_wrapped(const std::string &label, float wrap_width)
+{
+    this->text_wrapped(label.c_str(), wrap_width);
+}
+
+void ImGuiWrapper::text_wrapped(const wxString &label, float wrap_width)
+{
+    auto label_utf8 = into_u8(label);
+    this->text_wrapped(label_utf8.c_str(), wrap_width);
+}
+
+void ImGuiWrapper::tooltip(const char *label, float wrap_width)
+{
+    ImGui::BeginTooltip();
+    ImGui::PushTextWrapPos(wrap_width);
+    ImGui::TextUnformatted(label);
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+}
+
+void ImGuiWrapper::tooltip(const wxString &label, float wrap_width)
+{
+    ImGui::BeginTooltip();
+    ImGui::PushTextWrapPos(wrap_width);
+    ImGui::TextUnformatted(label.ToUTF8().data());
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+}
+
+#if ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
+ImVec2 ImGuiWrapper::get_slider_icon_size() const
+{
+    return this->calc_button_size(std::wstring(&ImGui::SliderFloatEditBtnIcon, 1));
+}
+
+bool ImGuiWrapper::slider_float(const char* label, float* v, float v_min, float v_max, const char* format/* = "%.3f"*/, float power/* = 1.0f*/, bool clamp /*= true*/, const wxString& tooltip /*= ""*/, bool show_edit_btn /*= true*/)
+{
+    const float max_tooltip_width = ImGui::GetFontSize() * 20.0f;
+
+    // let the label string start with "##" to hide the automatic label from ImGui::SliderFloat()
+    bool label_visible = !boost::algorithm::istarts_with(label, "##");
+    std::string str_label = label_visible ? std::string("##") + std::string(label) : std::string(label);
+
+    // removes 2nd evenience of "##", if present
+    std::string::size_type pos = str_label.find("##", 2);
+    if (pos != std::string::npos)
+        str_label = str_label.substr(0, pos) + str_label.substr(pos + 2);
+
+    bool ret = ImGui::SliderFloat(str_label.c_str(), v, v_min, v_max, format, power);
+    if (!tooltip.empty() && ImGui::IsItemHovered())
+        this->tooltip(into_u8(tooltip).c_str(), max_tooltip_width);
+
+    if (clamp)
+        *v = std::clamp(*v, v_min, v_max);
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    if (show_edit_btn) {
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 1, style.ItemSpacing.y });
+        ImGui::SameLine();
+        std::wstring btn_name = ImGui::SliderFloatEditBtnIcon + boost::nowide::widen(str_label);
+        ImGui::PushStyleColor(ImGuiCol_Button, { 0.25f, 0.25f, 0.25f, 0.0f });
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, { 0.5f, 0.5f, 0.5f, 1.0f });
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, { 0.5f, 0.5f, 0.5f, 1.0f });
+        if (ImGui::Button(into_u8(btn_name).c_str())) {
+            ImGui::SetKeyboardFocusHere(-1);
+            this->set_requires_extra_frame();
+        }
+        ImGui::PopStyleColor(3);
+        if (ImGui::IsItemHovered())
+            this->tooltip(into_u8(_L("Edit")).c_str(), max_tooltip_width);
+
+        ImGui::PopStyleVar();
+    }
+
+    if (label_visible) {
+        // if the label is visible, hide the part of it that should be hidden
+        std::string out_label = std::string(label);
+        std::string::size_type pos = out_label.find("##");
+        if (pos != std::string::npos)
+            out_label = out_label.substr(0, pos);
+
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 1, style.ItemSpacing.y });
+        ImGui::SameLine();
+        this->text(out_label.c_str());
+        ImGui::PopStyleVar();
+    }
+
+    return ret;
+}
+
+bool ImGuiWrapper::slider_float(const std::string& label, float* v, float v_min, float v_max, const char* format/* = "%.3f"*/, float power/* = 1.0f*/, bool clamp /*= true*/, const wxString& tooltip /*= ""*/, bool show_edit_btn /*= true*/)
+{
+    return this->slider_float(label.c_str(), v, v_min, v_max, format, power, clamp, tooltip, show_edit_btn);
+}
+
+bool ImGuiWrapper::slider_float(const wxString& label, float* v, float v_min, float v_max, const char* format/* = "%.3f"*/, float power/* = 1.0f*/, bool clamp /*= true*/, const wxString& tooltip /*= ""*/, bool show_edit_btn /*= true*/)
+{
+    auto label_utf8 = into_u8(label);
+    return this->slider_float(label_utf8.c_str(), v, v_min, v_max, format, power, clamp, tooltip, show_edit_btn);
+}
+#else
 bool ImGuiWrapper::slider_float(const char* label, float* v, float v_min, float v_max, const char* format/* = "%.3f"*/, float power/* = 1.0f*/, bool clamp /*= true*/)
 {
     bool ret = ImGui::SliderFloat(label, v, v_min, v_max, format, power);
@@ -440,6 +573,7 @@ bool ImGuiWrapper::slider_float(const wxString& label, float* v, float v_min, fl
     auto label_utf8 = into_u8(label);
     return this->slider_float(label_utf8.c_str(), v, v_min, v_max, format, power, clamp);
 }
+#endif // ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
 
 bool ImGuiWrapper::combo(const wxString& label, const std::vector<std::string>& options, int& selection)
 {
@@ -910,15 +1044,7 @@ std::vector<unsigned char> ImGuiWrapper::load_svg(const std::string& bitmap_name
 {
     std::vector<unsigned char> empty_vector;
 
-#ifdef __WXMSW__
-    std::string folder = "white\\";
-#else
-    std::string folder = "white/";
-#endif        
-    if (!boost::filesystem::exists(Slic3r::var(folder + bitmap_name + ".svg")))
-        folder.clear();
-
-    NSVGimage* image = ::nsvgParseFromFile(Slic3r::var(folder + bitmap_name + ".svg").c_str(), "px", 96.0f);
+    NSVGimage* image = BitmapCache::nsvgParseFromFileWithReplace(Slic3r::var(bitmap_name + ".svg").c_str(), "px", 96.0f, { { "\"#808080\"", "\"#FFFFFF\"" } });
     if (image == nullptr)
         return empty_vector;
 
@@ -1090,6 +1216,7 @@ void ImGuiWrapper::init_input()
     io.KeyMap[ImGuiKey_Backspace] = WXK_BACK;
     io.KeyMap[ImGuiKey_Space] = WXK_SPACE;
     io.KeyMap[ImGuiKey_Enter] = WXK_RETURN;
+    io.KeyMap[ImGuiKey_KeyPadEnter] = WXK_NUMPAD_ENTER;
     io.KeyMap[ImGuiKey_Escape] = WXK_ESCAPE;
     io.KeyMap[ImGuiKey_A] = 'A';
     io.KeyMap[ImGuiKey_C] = 'C';

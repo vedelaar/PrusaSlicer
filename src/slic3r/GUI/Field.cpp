@@ -230,18 +230,21 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
 		}
         double val;
 
+        bool is_na_value = m_opt.nullable && str == na_value();
+
         const char dec_sep = is_decimal_separator_point() ? '.' : ',';
         const char dec_sep_alt = dec_sep == '.' ? ',' : '.';
-        // Replace the first incorrect separator in decimal number.
-        if (str.Replace(dec_sep_alt, dec_sep, false) != 0)
+        // Replace the first incorrect separator in decimal number, 
+        // if this value doesn't "N/A" value in some language
+        // see https://github.com/prusa3d/PrusaSlicer/issues/6921
+        if (!is_na_value && str.Replace(dec_sep_alt, dec_sep, false) != 0)
             set_value(str, false);
-
 
         if (str == dec_sep)
             val = 0.0;
         else
         {
-            if (m_opt.nullable && str == na_value())
+            if (is_na_value)
                 val = ConfigOptionFloatsNullable::nil_value();
             else if (!str.ToDouble(&val))
             {
@@ -312,8 +315,8 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                 set_value(double_to_string(val), true);
             }
             else if (((m_opt.sidetext.rfind("mm/s") != std::string::npos && val > m_opt.max) ||
-                     (m_opt.sidetext.rfind("mm ") != std::string::npos && val > 1)) &&
-                     (m_value.empty() || std::string(str.ToUTF8().data()) != boost::any_cast<std::string>(m_value)))
+                     (m_opt.sidetext.rfind("mm ") != std::string::npos && val > /*1*/m_opt.max_literal)) &&
+                     (m_value.empty() || into_u8(str) != boost::any_cast<std::string>(m_value)))
             {
                 if (!check_value) {
                     m_value.clear();
@@ -327,7 +330,6 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                 const wxString msg_text = from_u8((boost::format(_utf8(L("Do you mean %s%% instead of %s %s?\n"
                     "Select YES if you want to change this value to %s%%, \n"
                     "or NO if you are sure that %s %s is a correct value."))) % stVal % stVal % sidetext % stVal % stVal % sidetext).str());
-//                wxMessageDialog dialog(m_parent, msg_text, _(L("Parameter validation")) + ": " + m_opt_id , wxICON_WARNING | wxYES | wxNO);
                 WarningDialog dialog(m_parent, msg_text, _L("Parameter validation") + ": " + m_opt_id, wxYES | wxNO);
                 if ((!infill_anchors || val > 100) && dialog.ShowModal() == wxID_YES) {
                     set_value(from_u8((boost::format("%s%%") % stVal).str()), false/*true*/);
@@ -338,7 +340,7 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
             }
         }
 
-        m_value = std::string(str.ToUTF8().data());
+        m_value = into_u8(str);
 		break; }
 
     case coPoints: {
@@ -411,7 +413,7 @@ void Field::sys_color_changed()
 template<class T>
 bool is_defined_input_value(wxWindow* win, const ConfigOptionType& type)
 {
-    if (!win || (static_cast<T*>(win)->GetValue().empty() && type != coString && type != coStrings))
+    if (!win || (static_cast<T*>(win)->GetValue().empty() && type != coString && type != coStrings && type != coPoints))
         return false;
     return true;
 }
@@ -974,7 +976,7 @@ void Choice::BUILD() {
                 propagate_value();
         } );
 
-        temp->Bind(wxEVT_TEXT_ENTER, [this, temp](wxEvent& e) {
+        temp->Bind(wxEVT_TEXT_ENTER, [this](wxEvent& e) {
             EnterPressed enter(this);
             propagate_value();
         } );
@@ -1284,7 +1286,7 @@ void Choice::msw_rescale()
     	size_t counter = 0;
     	bool   labels = ! m_opt.enum_labels.empty();
         for (const std::string &el : labels ? m_opt.enum_labels : m_opt.enum_values) {
-        	wxString text = labels ? _(el) : wxString::FromUTF8(el.c_str());
+        	wxString text = labels ? _(el) : from_u8(el);
             field->Append(text);
             if (text == selection)
                 idx = counter;
@@ -1317,7 +1319,7 @@ void ColourPicker::BUILD()
     if (m_opt.width >= 0) size.SetWidth(m_opt.width*m_em_unit);
 
 	// Validate the color
-	wxString clr_str(m_opt.get_default_value<ConfigOptionStrings>()->get_at(m_opt_idx));
+	wxString clr_str(m_opt.type == coString ? m_opt.get_default_value<ConfigOptionString>()->value : m_opt.get_default_value<ConfigOptionStrings>()->get_at(m_opt_idx));
 	wxColour clr(clr_str);
 	if (clr_str.IsEmpty() || !clr.IsOk()) {
 		clr = wxTransparentColour;
@@ -1572,7 +1574,7 @@ void StaticText::BUILD()
     if (m_opt.height >= 0) size.SetHeight(m_opt.height*m_em_unit);
     if (m_opt.width >= 0) size.SetWidth(m_opt.width*m_em_unit);
 
-    const wxString legend = wxString::FromUTF8(m_opt.get_default_value<ConfigOptionString>()->value.c_str());
+    const wxString legend = from_u8(m_opt.get_default_value<ConfigOptionString>()->value);
     auto temp = new wxStaticText(m_parent, wxID_ANY, legend, wxDefaultPosition, size, wxST_ELLIPSIZE_MIDDLE);
 	temp->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 	temp->SetBackgroundStyle(wxBG_STYLE_PAINT);

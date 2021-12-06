@@ -16,9 +16,7 @@
 #include "slic3r/GUI/GUI_ObjectManipulation.hpp"
 #include "libslic3r/AppConfig.hpp"
 #include "libslic3r/Model.hpp"
-#if ENABLE_SINKING_CONTOURS
 #include "libslic3r/TriangleMeshSlicer.hpp"
-#endif // ENABLE_SINKING_CONTOURS
 
 namespace Slic3r {
 namespace GUI {
@@ -49,7 +47,7 @@ bool GLGizmoCut::on_init()
 
 std::string GLGizmoCut::on_get_name() const
 {
-    return (_L("Cut") + " [C]").ToUTF8().data();
+    return _u8L("Cut");
 }
 
 void GLGizmoCut::on_set_state()
@@ -92,9 +90,7 @@ void GLGizmoCut::on_render()
     m_max_z = box.max.z();
     set_cut_z(m_cut_z);
 
-#if ENABLE_SINKING_CONTOURS
     update_contours();
-#endif // ENABLE_SINKING_CONTOURS
 
     const float min_x = box.min.x() - Margin;
     const float max_x = box.max.x() + Margin;
@@ -136,20 +132,18 @@ void GLGizmoCut::on_render()
     if (shader == nullptr)
         return;
     shader->start_using();
-    shader->set_uniform("emission_factor", 0.1);
+    shader->set_uniform("emission_factor", 0.1f);
 
     m_grabbers[0].color = GrabberColor;
     m_grabbers[0].render(m_hover_id == 0, (float)((box.size().x() + box.size().y() + box.size().z()) / 3.0));
 
     shader->stop_using();
 
-#if ENABLE_SINKING_CONTOURS
     glsafe(::glPushMatrix());
     glsafe(::glTranslated(m_cut_contours.shift.x(), m_cut_contours.shift.y(), m_cut_contours.shift.z()));
     glsafe(::glLineWidth(2.0f));
     m_cut_contours.contours.render();
     glsafe(::glPopMatrix());
-#endif // ENABLE_SINKING_CONTOURS
 }
 
 void GLGizmoCut::on_render_for_picking()
@@ -173,7 +167,11 @@ void GLGizmoCut::on_render_input_window(float x, float y, float bottom_limit)
     ImGui::SetWindowPos(ImVec2(x, y), ImGuiCond_Always);
     if (last_h != win_h || last_y != y) {
         // ask canvas for another frame to render the window in the correct position
+#if ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
+        m_imgui->set_requires_extra_frame();
+#else
         m_parent.request_extra_frame();
+#endif // ENABLE_ENHANCED_IMGUI_SLIDER_FLOAT
         if (last_h != win_h)
             last_h = win_h;
         if (last_y != y)
@@ -188,7 +186,7 @@ void GLGizmoCut::on_render_input_window(float x, float y, float bottom_limit)
     double cut_z = m_cut_z;
     if (imperial_units)
         cut_z *= ObjectManipulation::mm_to_in;
-    ImGui::InputDouble("", &cut_z, 0.0f, 0.0f, "%.2f");
+    ImGui::InputDouble("", &cut_z, 0.0f, 0.0f, "%.2f", ImGuiInputTextFlags_CharsDecimal);
 
     ImGui::SameLine();
     m_imgui->text(imperial_units ? _L("in") : _L("mm"));
@@ -275,28 +273,25 @@ BoundingBoxf3 GLGizmoCut::bounding_box() const
     return ret;
 }
 
-#if ENABLE_SINKING_CONTOURS
 void GLGizmoCut::update_contours()
 {
     const Selection& selection = m_parent.get_selection();
     const GLVolume* first_glvolume = selection.get_volume(*selection.get_volume_idxs().begin());
     const BoundingBoxf3& box = first_glvolume->transformed_convex_hull_bounding_box();
 
-    const int object_idx = selection.get_object_idx();
+    const ModelObject* model_object = wxGetApp().model().objects[selection.get_object_idx()];
     const int instance_idx = selection.get_instance_idx();
 
     if (0.0 < m_cut_z && m_cut_z < m_max_z) {
-        if (m_cut_contours.cut_z != m_cut_z || m_cut_contours.object_idx != object_idx || m_cut_contours.instance_idx != instance_idx) {
+        if (m_cut_contours.cut_z != m_cut_z || m_cut_contours.object_id != model_object->id() || m_cut_contours.instance_idx != instance_idx) {
             m_cut_contours.cut_z = m_cut_z;
 
-            if (m_cut_contours.object_idx != object_idx) {
-                m_cut_contours.mesh = wxGetApp().plater()->model().objects[object_idx]->raw_mesh();
-                m_cut_contours.mesh.repair();
-            }
+            if (m_cut_contours.object_id != model_object->id())
+                m_cut_contours.mesh = model_object->raw_mesh();
 
             m_cut_contours.position = box.center();
             m_cut_contours.shift = Vec3d::Zero();
-            m_cut_contours.object_idx = object_idx;
+            m_cut_contours.object_id = model_object->id();
             m_cut_contours.instance_idx = instance_idx;
             m_cut_contours.contours.reset();
 
@@ -315,7 +310,6 @@ void GLGizmoCut::update_contours()
     else
         m_cut_contours.contours.reset();
 }
-#endif // ENABLE_SINKING_CONTOURS
 
 } // namespace GUI
 } // namespace Slic3r

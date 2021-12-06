@@ -4,6 +4,7 @@
 #include "../ClipperUtils.hpp"
 #include "../EdgeGrid.hpp"
 #include "../Geometry.hpp"
+#include "../Geometry/Circle.hpp"
 #include "../Point.hpp"
 #include "../PrintConfig.hpp"
 #include "../Surface.hpp"
@@ -18,6 +19,7 @@
 #include "FillLine.hpp"
 #include "FillRectilinear.hpp"
 #include "FillAdaptive.hpp"
+#include "FillLightning.hpp"
 
 // #define INFILL_DEBUG_OUTPUT
 
@@ -44,6 +46,9 @@ Fill* Fill::new_from_type(const InfillPattern type)
     case ipAdaptiveCubic:       return new FillAdaptive::Filler();
     case ipSupportCubic:        return new FillAdaptive::Filler();
     case ipSupportBase:         return new FillSupportBase();
+#if HAS_LIGHTNING_INFILL
+    case ipLightning:           return new FillLightning::Filler();
+#endif // HAS_LIGHTNING_INFILL
     default: throw Slic3r::InvalidArgument("unknown type");
     }
 }

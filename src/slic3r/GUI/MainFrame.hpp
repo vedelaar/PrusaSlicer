@@ -158,6 +158,8 @@ public:
     void        init_menubar_as_editor();
     void        init_menubar_as_gcodeviewer();
     void        update_menubar();
+    // Open item in menu by menu and item name (in actual language)
+    void        open_menubar_item(const wxString& menu_name,const wxString& item_name);
 #ifdef _WIN32
     void        show_tabs_menu(bool show);
 #endif
@@ -188,7 +190,7 @@ public:
     bool can_save() const;
     bool can_save_as() const;
     void save_project();
-    void save_project_as(const wxString& filename = wxString());
+    bool save_project_as(const wxString& filename = wxString());
 
     void        add_to_recent_projects(const wxString& filename);
     void        technology_changed();
@@ -200,9 +202,9 @@ public:
     SettingsDialog        m_settings_dialog;
     DiffPresetDialog      diff_dialog;
     wxWindow*             m_plater_page{ nullptr };
-    wxProgressDialog*     m_progress_dialog { nullptr };
+//    wxProgressDialog*     m_progress_dialog { nullptr };
     PrintHostQueueDialog* m_printhost_queue_dlg;
-    std::shared_ptr<ProgressStatusBar>  m_statusbar;
+//    std::shared_ptr<ProgressStatusBar>  m_statusbar;
 
 #ifdef __APPLE__
     std::unique_ptr<wxTaskBarIcon> m_taskbar_icon;

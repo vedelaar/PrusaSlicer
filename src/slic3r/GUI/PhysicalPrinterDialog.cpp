@@ -396,6 +396,7 @@ void PhysicalPrinterDialog::build_printhost_settings(ConfigOptionsGroup* m_optgr
         m_optgroup->append_line(cafile_hint);
     }
     else {
+        
         Line line{ "", "" };
         line.full_width = 1;
 
@@ -411,7 +412,6 @@ void PhysicalPrinterDialog::build_printhost_settings(ConfigOptionsGroup* m_optgr
             sizer->Add(txt, 1, wxEXPAND);
             return sizer;
         };
-
         m_optgroup->append_line(line);
     }
 
@@ -420,6 +420,12 @@ void PhysicalPrinterDialog::build_printhost_settings(ConfigOptionsGroup* m_optgr
         option.opt.width = Field::def_width_wider();
         m_optgroup->append_single_option_line(option);
     }
+
+#ifdef WIN32
+    option = m_optgroup->get_option("printhost_ssl_ignore_revoke");
+    option.opt.width = Field::def_width_wider();
+    m_optgroup->append_single_option_line(option);
+#endif
 
     m_optgroup->activate();
 
@@ -522,16 +528,21 @@ void PhysicalPrinterDialog::update_host_type(bool printer_change)
         std::string preset_name = prstft->get_preset_name();
         if (Preset* preset = wxGetApp().preset_bundle->printers.find_preset(preset_name)) {
             std::string model_id = preset->config.opt_string("printer_model");
-            if (preset->vendor && preset->vendor->name == "Prusa Research") {
-                const std::vector<VendorProfile::PrinterModel>& models = preset->vendor->models;
-                auto it = std::find_if(models.begin(), models.end(),
-                    [model_id](const VendorProfile::PrinterModel& model) { return model.id == model_id; });
-                if (it != models.end() && it->family == "MK3")
-                    continue;
-            } else if (!preset->vendor && model_id.rfind("MK3", 0) == 0) {
+            auto model_supports_prusalink = [](const std::string &model) {
+                return model.size() >= 3 &&
+                    ((boost::starts_with(model, "MK") && model[2] > '2' && model[2] <= '9') ||
+                      boost::starts_with(model, "MINI"));
+            };
+            if (preset->vendor) {
+                if (preset->vendor->name == "Prusa Research") {
+                    const std::vector<VendorProfile::PrinterModel>& models = preset->vendor->models;
+                    auto it = std::find_if(models.begin(), models.end(),
+                        [model_id](const VendorProfile::PrinterModel& model) { return model.id == model_id; });
+                    if (it != models.end() && model_supports_prusalink(it->family))
+                        continue;
+                }
+            } else if (model_supports_prusalink(model_id))
                 continue;
-            }
-            
         }
         all_presets_are_from_mk3_family = false;
         break;

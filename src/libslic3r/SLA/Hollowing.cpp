@@ -7,7 +7,7 @@
 #include <libslic3r/SLA/Hollowing.hpp>
 #include <libslic3r/SLA/IndexedMesh.hpp>
 #include <libslic3r/ClipperUtils.hpp>
-#include <libslic3r/SimplifyMesh.hpp>
+#include <libslic3r/QuadricEdgeCollapse.hpp>
 #include <libslic3r/SLA/SupportTreeMesher.hpp>
 
 #include <boost/log/trivial.hpp>
@@ -132,7 +132,10 @@ InteriorPtr generate_interior(const TriangleMesh &   mesh,
 
         // flip normals back...
         swap_normals(interior->mesh);
-        Slic3r::simplify_mesh(interior->mesh);
+
+        // simplify mesh lossless
+        float loss_less_max_error = 2*std::numeric_limits<float>::epsilon();
+        its_quadric_edge_collapse(interior->mesh, 0U, &loss_less_max_error);
 
         its_compactify_vertices(interior->mesh);
         its_merge_vertices(interior->mesh);
@@ -286,8 +289,6 @@ void cut_drainholes(std::vector<ExPolygons> & obj_slices,
     
     if (mesh.empty()) return;
     
-    mesh.require_shared_vertices();
- 
     std::vector<ExPolygons> hole_slices = slice_mesh_ex(mesh.its, slicegrid, closing_radius, thr);
     
     if (obj_slices.size() != hole_slices.size())
@@ -316,7 +317,6 @@ void hollow_mesh(TriangleMesh &mesh, const Interior &interior, int flags)
         remove_inside_triangles(mesh, interior);
 
     mesh.merge(TriangleMesh{interior.mesh});
-    mesh.require_shared_vertices();
 }
 
 // Get the distance of p to the interior's zero iso_surface. Interior should
@@ -557,8 +557,7 @@ void remove_inside_triangles(TriangleMesh &mesh, const Interior &interior,
     new_faces = {};
 
     mesh = TriangleMesh{mesh.its};
-    mesh.repaired = true;
-    mesh.require_shared_vertices();
+    //FIXME do we want to repair the mesh? Are there duplicate vertices or flipped triangles?
 }
 
 }} // namespace Slic3r::sla

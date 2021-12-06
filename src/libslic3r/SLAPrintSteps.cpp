@@ -526,7 +526,6 @@ void SLAPrint::Steps::slice_model(SLAPrintObject &po)
     }
     auto  thr        = [this]() { m_print->throw_if_canceled(); };
     auto &slice_grid = po.m_model_height_levels;
-    assert(mesh.has_shared_vertices());
     po.m_model_slices = slice_mesh_ex(mesh.its, slice_grid, params, thr);
 
     sla::Interior *interior = po.m_hollowing_data ?
@@ -560,7 +559,7 @@ void SLAPrint::Steps::slice_model(SLAPrintObject &po)
 
     if(po.m_config.supports_enable.getBool() || po.m_config.pad_enable.getBool())
     {
-        po.m_supportdata.reset(new SLAPrintObject::SupportData(mesh));
+        po.m_supportdata.reset(new SLAPrintObject::SupportData(po.get_mesh_to_print()));
     }
 }
 
@@ -571,10 +570,8 @@ void SLAPrint::Steps::support_points(SLAPrintObject &po)
     // If supports are disabled, we can skip the model scan.
     if(!po.m_config.supports_enable.getBool()) return;
 
-    const TriangleMesh &mesh = po.get_mesh_to_slice();
-
     if (!po.m_supportdata)
-        po.m_supportdata.reset(new SLAPrintObject::SupportData(mesh));
+        po.m_supportdata.reset(new SLAPrintObject::SupportData(po.get_mesh_to_print()));
 
     const ModelObject& mo = *po.m_model_object;
 

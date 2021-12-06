@@ -33,6 +33,7 @@ namespace cereal {
 namespace Slic3r {
 enum class ConversionType;
 
+class BuildVolume;
 class Model;
 class ModelInstance;
 class ModelMaterial;
@@ -285,6 +286,10 @@ public:
     void                    clear_volumes();
     void                    sort_volumes(bool full_sort);
     bool                    is_multiparts() const { return volumes.size() > 1; }
+    // Checks if any of object volume is painted using the fdm support painting gizmo.
+    bool                    is_fdm_support_painted() const;
+    // Checks if any of object volume is painted using the seam painting gizmo.
+    bool                    is_seam_painted() const;
     // Checks if any of object volume is painted using the multi-material painting gizmo.
     bool                    is_mm_painted() const;
 
@@ -342,12 +347,12 @@ public:
     void mirror(Axis axis);
 
     // This method could only be called before the meshes of this ModelVolumes are not shared!
-    void scale_mesh_after_creation(const Vec3d& versor);
+    void scale_mesh_after_creation(const float scale);
     void convert_units(ModelObjectPtrs&new_objects, ConversionType conv_type, std::vector<int> volume_idxs);
 
     size_t materials_count() const;
     size_t facets_count() const;
-    bool needed_repair() const;
+    size_t parts_count() const;
     ModelObjectPtrs cut(size_t instance, coordf_t z, ModelObjectCutAttributes attributes);
     void split(ModelObjectPtrs* new_objects);
     void merge();
@@ -358,10 +363,9 @@ public:
     void bake_xy_rotation_into_meshes(size_t instance_idx);
 
     double get_min_z() const;
+    double get_max_z() const;
     double get_instance_min_z(size_t instance_idx) const;
-
-    // Called by Print::validate() from the UI thread.
-    unsigned int check_instances_print_volume_state(const BoundingBoxf3& print_volume);
+    double get_instance_max_z(size_t instance_idx) const;
 
     // Print object statistics to console.
     void print_info() const;
@@ -369,9 +373,9 @@ public:
     std::string get_export_filename() const;
 
     // Get full stl statistics for all object's meshes
-    stl_stats   get_object_stl_stats() const;
+    TriangleMeshStats get_object_stl_stats() const;
     // Get count of errors in the mesh( or all object's meshes, if volume index isn't defined)
-    int         get_mesh_errors_count(const int vol_idx = -1) const;
+    int         get_repaired_errors_count(const int vol_idx = -1) const;
 
 private:
     friend class Model;
@@ -495,6 +499,9 @@ private:
             sla_support_points, sla_points_status, sla_drain_holes, printable, origin_translation,
             m_bounding_box, m_bounding_box_valid, m_raw_bounding_box, m_raw_bounding_box_valid, m_raw_mesh_bounding_box, m_raw_mesh_bounding_box_valid);
 	}
+
+    // Called by Print::validate() from the UI thread.
+    unsigned int update_instances_print_volume_state(const BuildVolume &build_volume);
 };
 
 enum class EnforcerBlockerType : int8_t {
@@ -538,7 +545,10 @@ public:
     indexed_triangle_set get_facets_strict(const ModelVolume& mv, EnforcerBlockerType type) const;
     bool has_facets(const ModelVolume& mv, EnforcerBlockerType type) const;
     bool empty() const { return m_data.first.empty(); }
-    void clear();
+
+    // Following method clears the config and increases its timestamp, so the deleted
+    // state is considered changed from perspective of the undo/redo stack.
+    void reset();
 
     // Serialize triangle into string, for serialization into 3MF/AMF.
     std::string get_triangle_as_string(int i) const;
@@ -610,6 +620,8 @@ public:
     const TriangleMesh& mesh() const { return *m_mesh.get(); }
     void                set_mesh(const TriangleMesh &mesh) { m_mesh = std::make_shared<const TriangleMesh>(mesh); }
     void                set_mesh(TriangleMesh &&mesh) { m_mesh = std::make_shared<const TriangleMesh>(std::move(mesh)); }
+    void                set_mesh(const indexed_triangle_set &mesh) { m_mesh = std::make_shared<const TriangleMesh>(mesh); }
+    void                set_mesh(indexed_triangle_set &&mesh) { m_mesh = std::make_shared<const TriangleMesh>(std::move(mesh)); }
     void                set_mesh(std::shared_ptr<const TriangleMesh> &mesh) { m_mesh = mesh; }
     void                set_mesh(std::unique_ptr<const TriangleMesh> &&mesh) { m_mesh = std::move(mesh); }
 	void				reset_mesh() { m_mesh = std::make_shared<const TriangleMesh>(); }
@@ -660,7 +672,8 @@ public:
     void                mirror(Axis axis);
 
     // This method could only be called before the meshes of this ModelVolumes are not shared!
-    void                scale_geometry_after_creation(const Vec3d& versor);
+    void                scale_geometry_after_creation(const Vec3f &versor);
+    void                scale_geometry_after_creation(const float scale) { this->scale_geometry_after_creation(Vec3f(scale, scale, scale)); }
 
     // Translates the mesh and the convex hull so that the origin of their vertices is in the center of this volume's bounding box.
     // Attention! This method may only be called just after ModelVolume creation! It must not be called once the TriangleMesh of this ModelVolume is shared!
@@ -668,9 +681,9 @@ public:
 
     void                calculate_convex_hull();
     const TriangleMesh& get_convex_hull() const;
-    std::shared_ptr<const TriangleMesh> get_convex_hull_shared_ptr() const { return m_convex_hull; }
+    const std::shared_ptr<const TriangleMesh>& get_convex_hull_shared_ptr() const { return m_convex_hull; }
     // Get count of errors in the mesh
-    int                 get_mesh_errors_count() const;
+    int                 get_repaired_errors_count() const;
 
     // Helpers for loading / storing into AMF / 3MF files.
     static ModelVolumeType type_from_string(const std::string &s);
@@ -717,6 +730,8 @@ public:
         this->mmu_segmentation_facets.set_new_unique_id();
     }
 
+    bool is_fdm_support_painted() const { return !this->supported_facets.empty(); }
+    bool is_seam_painted() const { return !this->seam_facets.empty(); }
     bool is_mm_painted() const { return !this->mmu_segmentation_facets.empty(); }
 
 protected:
@@ -762,7 +777,7 @@ private:
         assert(this->id() != this->supported_facets.id());
         assert(this->id() != this->seam_facets.id());
         assert(this->id() != this->mmu_segmentation_facets.id());
-        if (mesh.stl.stats.number_of_facets > 1)
+        if (mesh.facets_count() > 1)
             calculate_convex_hull();
     }
     ModelVolume(ModelObject *object, TriangleMesh &&mesh, TriangleMesh &&convex_hull, ModelVolumeType type = ModelVolumeType::MODEL_PART) :
@@ -818,7 +833,7 @@ private:
         assert(this->config.id() == other.config.id());
         this->set_material_id(other.material_id());
         this->config.set_new_unique_id();
-        if (mesh.stl.stats.number_of_facets > 1)
+        if (mesh.facets_count() > 1)
             calculate_convex_hull();
 		assert(this->config.id().valid()); 
         assert(this->config.id() != other.config.id()); 
@@ -889,7 +904,6 @@ enum ModelInstanceEPrintVolumeState : unsigned char
     ModelInstancePVS_Fully_Outside,
     ModelInstanceNum_BedStates
 };
-
 
 // A single instance of a ModelObject.
 // Knows the affine transformation of an object.
@@ -1095,8 +1109,8 @@ public:
     BoundingBoxf3 bounding_box() const;
     // Set the print_volume_state of PrintObject::instances, 
     // return total number of printable objects.
-    unsigned int  update_print_volume_state(const BoundingBoxf3 &print_volume);
-	// Returns true if any ModelObject was modified.
+    unsigned int  update_print_volume_state(const BuildVolume &build_volume);
+    // Returns true if any ModelObject was modified.
     bool 		  center_instances_around_point(const Vec2d &point);
     void 		  translate(coordf_t x, coordf_t y, coordf_t z) { for (ModelObject *o : this->objects) o->translate(x, y, z); }
     TriangleMesh  mesh() const;
@@ -1110,6 +1124,7 @@ public:
     void          convert_from_imperial_units(bool only_small_volumes);
     bool          looks_like_saved_in_meters() const;
     void          convert_from_meters(bool only_small_volumes);
+    int           removed_objects_with_zero_volume();
 
     // Ensures that the min z of the model is not negative
     void 		  adjust_min_z();
@@ -1120,6 +1135,13 @@ public:
     std::string   propose_export_file_name_and_path() const;
     // Propose an output path, replace extension. The new_extension shall contain the initial dot.
     std::string   propose_export_file_name_and_path(const std::string &new_extension) const;
+
+    // Checks if any of objects is painted using the fdm support painting gizmo.
+    bool          is_fdm_support_painted() const;
+    // Checks if any of objects is painted using the seam painting gizmo.
+    bool          is_seam_painted() const;
+    // Checks if any of objects is painted using the multi-material painting gizmo.
+    bool          is_mm_painted() const;
 
 private:
     explicit Model(int) : ObjectBase(-1) { assert(this->id().invalid()); }
@@ -1177,6 +1199,7 @@ void check_model_ids_equal(const Model &model1, const Model &model2);
 #endif /* NDEBUG */
 
 static const float SINKING_Z_THRESHOLD = -0.001f;
+static const double SINKING_MIN_Z_THRESHOLD = 0.05;
 
 } // namespace Slic3r
 

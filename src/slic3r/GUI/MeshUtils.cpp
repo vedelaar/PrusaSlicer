@@ -4,6 +4,7 @@
 #include "libslic3r/TriangleMesh.hpp"
 #include "libslic3r/TriangleMeshSlicer.hpp"
 #include "libslic3r/ClipperUtils.hpp"
+#include "libslic3r/Model.hpp"
 
 #include "slic3r/GUI/Camera.hpp"
 
@@ -79,23 +80,20 @@ void MeshClipper::render_cut()
 void MeshClipper::recalculate_triangles()
 {
     const Transform3f& instance_matrix_no_translation_no_scaling = m_trafo.get_matrix(true,false,true).cast<float>();
-    const Vec3f& scaling = m_trafo.get_scaling_factor().cast<float>();
     // Calculate clipping plane normal in mesh coordinates.
-    Vec3f up_noscale = instance_matrix_no_translation_no_scaling.inverse() * m_plane.get_normal().cast<float>();
-    Vec3d up (up_noscale(0)*scaling(0), up_noscale(1)*scaling(1), up_noscale(2)*scaling(2));
+    const Vec3f up_noscale = instance_matrix_no_translation_no_scaling.inverse() * m_plane.get_normal().cast<float>();
+    const Vec3d up = up_noscale.cast<double>().cwiseProduct(m_trafo.get_scaling_factor());
     // Calculate distance from mesh origin to the clipping plane (in mesh coordinates).
-    float height_mesh = m_plane.distance(m_trafo.get_offset()) * (up_noscale.norm()/up.norm());
+    const float height_mesh = m_plane.distance(m_trafo.get_offset()) * (up_noscale.norm()/up.norm());
 
     // Now do the cutting
     MeshSlicingParams slicing_params;
     slicing_params.trafo.rotate(Eigen::Quaternion<double, Eigen::DontAlign>::FromTwoVectors(up, Vec3d::UnitZ()));
 
-    assert(m_mesh->has_shared_vertices());
     ExPolygons expolys = union_ex(slice_mesh(m_mesh->its, height_mesh, slicing_params));
 
     if (m_negative_mesh && !m_negative_mesh->empty()) {
-        assert(m_negative_mesh->has_shared_vertices());
-        ExPolygons neg_expolys = union_ex(slice_mesh(m_negative_mesh->its, height_mesh, slicing_params));
+        const ExPolygons neg_expolys = union_ex(slice_mesh(m_negative_mesh->its, height_mesh, slicing_params));
         expolys = diff_ex(expolys, neg_expolys);
     }
 
@@ -105,20 +103,19 @@ void MeshClipper::recalculate_triangles()
     Transform3d tr = Transform3d::Identity();
     tr.rotate(q);
     tr = m_trafo.get_matrix() * tr;
-    height_mesh += 0.001f; // to avoid z-fighting
 
     if (m_limiting_plane != ClippingPlane::ClipsNothing())
     {
         // Now remove whatever ended up below the limiting plane (e.g. sinking objects).
         // First transform the limiting plane from world to mesh coords.
         // Note that inverse of tr transforms the plane from world to horizontal.
-        Vec3d normal_old = m_limiting_plane.get_normal().normalized();
-        Vec3d normal_new = (tr.matrix().block<3,3>(0,0).transpose() * normal_old).normalized();
+        const Vec3d normal_old = m_limiting_plane.get_normal().normalized();
+        const Vec3d normal_new = (tr.matrix().block<3,3>(0,0).transpose() * normal_old).normalized();
 
         // normal_new should now be the plane normal in mesh coords. To find the offset,
         // transform a point and set offset so it belongs to the transformed plane.
         Vec3d pt = Vec3d::Zero();
-        double plane_offset = m_limiting_plane.get_data()[3];
+        const double plane_offset = m_limiting_plane.get_data()[3];
         if (std::abs(normal_old.z()) > 0.5) // normal is normalized, at least one of the coords if larger than sqrt(3)/3 = 0.57
             pt.z() = - plane_offset / normal_old.z();
         else if (std::abs(normal_old.y()) > 0.5)
@@ -126,27 +123,25 @@ void MeshClipper::recalculate_triangles()
         else
             pt.x() = - plane_offset / normal_old.x();
         pt = tr.inverse() * pt;
-        double offset = -(normal_new.dot(pt));
+        const double offset = -(normal_new.dot(pt));
 
         if (std::abs(normal_old.dot(m_plane.get_normal().normalized())) > 0.99) {
             // The cuts are parallel, show all or nothing.
-            if (offset < height_mesh)
+            if (normal_old.dot(m_plane.get_normal().normalized()) < 0.0 && offset < height_mesh)
                 expolys.clear();
         } else {
             // The cut is a horizontal plane defined by z=height_mesh.
             // ax+by+e=0 is the line of intersection with the limiting plane.
             // Normalized so a^2 + b^2 = 1.
-            double len = std::hypot(normal_new.x(), normal_new.y());
+            const double len = std::hypot(normal_new.x(), normal_new.y());
             if (len == 0.)
                 return;
-            double a = normal_new.x() / len;
-            double b = normal_new.y() / len;
-            double e = (normal_new.z() * height_mesh + offset) / len;
-            if (b == 0.)
-                return;
+            const double a = normal_new.x() / len;
+            const double b = normal_new.y() / len;
+            const double e = (normal_new.z() * height_mesh + offset) / len;
 
             // We need a half-plane to limit the cut. Get angle of the intersecting line.
-            double angle = std::atan(-a/b);
+            double angle = (b != 0.0) ? std::atan(-a / b) : ((a < 0.0) ? -0.5 * M_PI : 0.5 * M_PI);
             if (b > 0) // select correct half-plane
                 angle += M_PI;
 
@@ -154,7 +149,7 @@ void MeshClipper::recalculate_triangles()
             // it so it lies on our line. This will be the figure to subtract
             // from the cut. The coordinates must not overflow after the transform,
             // make the rectangle a bit smaller.
-            coord_t size = (std::numeric_limits<coord_t>::max() - scale_(std::max(std::abs(e*a), std::abs(e*b)))) / 4;
+            const coord_t size = (std::numeric_limits<coord_t>::max() - scale_(std::max(std::abs(e*a), std::abs(e*b)))) / 4;
             Polygons ep {Polygon({Point(-size, 0), Point(size, 0), Point(size, 2*size), Point(-size, 2*size)})};
             ep.front().rotate(angle);
             ep.front().translate(scale_(-e * a), scale_(-e * b));
@@ -164,12 +159,14 @@ void MeshClipper::recalculate_triangles()
 
     m_triangles2d = triangulate_expolygons_2f(expolys, m_trafo.get_matrix().matrix().determinant() < 0.);
 
+    tr.pretranslate(0.001 * m_plane.get_normal().normalized()); // to avoid z-fighting
+
     m_vertex_array.release_geometry();
     for (auto it=m_triangles2d.cbegin(); it != m_triangles2d.cend(); it=it+3) {
         m_vertex_array.push_geometry(tr * Vec3d((*(it+0))(0), (*(it+0))(1), height_mesh), up);
         m_vertex_array.push_geometry(tr * Vec3d((*(it+1))(0), (*(it+1))(1), height_mesh), up);
         m_vertex_array.push_geometry(tr * Vec3d((*(it+2))(0), (*(it+2))(1), height_mesh), up);
-        size_t idx = it - m_triangles2d.cbegin();
+        const size_t idx = it - m_triangles2d.cbegin();
         m_vertex_array.push_triangle(idx, idx+1, idx+2);
     }
     m_vertex_array.finalize_geometry(true);
@@ -225,7 +222,7 @@ bool MeshRaycaster::unproject_on_mesh(const Vec2d& mouse_pos, const Transform3d&
     // Also, remove anything below the bed (sinking objects).
     for (i=0; i<hits.size(); ++i) {
         Vec3d transformed_hit = trafo * hits[i].position();
-        if (transformed_hit.z() >= 0. &&
+        if (transformed_hit.z() >= SINKING_Z_THRESHOLD &&
             (! clipping_plane || ! clipping_plane->is_point_clipped(transformed_hit)))
             break;
     }
@@ -253,11 +250,10 @@ std::vector<unsigned> MeshRaycaster::get_unobscured_idxs(const Geometry::Transfo
     std::vector<unsigned> out;
 
     const Transform3d& instance_matrix_no_translation_no_scaling = trafo.get_matrix(true,false,true);
-    Vec3f direction_to_camera = -camera.get_dir_forward().cast<float>();
-    Vec3f direction_to_camera_mesh = (instance_matrix_no_translation_no_scaling.inverse().cast<float>() * direction_to_camera).normalized().eval();
-    Vec3f scaling = trafo.get_scaling_factor().cast<float>();
-    direction_to_camera_mesh = Vec3f(direction_to_camera_mesh(0)*scaling(0), direction_to_camera_mesh(1)*scaling(1), direction_to_camera_mesh(2)*scaling(2));
-    const Transform3f inverse_trafo = trafo.get_matrix().inverse().cast<float>();
+    Vec3d direction_to_camera = -camera.get_dir_forward();
+    Vec3d direction_to_camera_mesh = (instance_matrix_no_translation_no_scaling.inverse() * direction_to_camera).normalized().eval();
+    direction_to_camera_mesh = direction_to_camera_mesh.cwiseProduct(trafo.get_scaling_factor());
+    const Transform3d inverse_trafo = trafo.get_matrix().inverse();
 
     for (size_t i=0; i<points.size(); ++i) {
         const Vec3f& pt = points[i];
@@ -268,9 +264,8 @@ std::vector<unsigned> MeshRaycaster::get_unobscured_idxs(const Geometry::Transfo
         // Cast a ray in the direction of the camera and look for intersection with the mesh:
         std::vector<sla::IndexedMesh::hit_result> hits;
         // Offset the start of the ray by EPSILON to account for numerical inaccuracies.
-        hits = m_emesh.query_ray_hits((inverse_trafo * pt + direction_to_camera_mesh * EPSILON).cast<double>(),
-                                      direction_to_camera.cast<double>());
-
+        hits = m_emesh.query_ray_hits((inverse_trafo * pt.cast<double>() + direction_to_camera_mesh * EPSILON),
+                                      direction_to_camera_mesh);
 
         if (! hits.empty()) {
             // If the closest hit facet normal points in the same direction as the ray,
@@ -309,7 +304,13 @@ Vec3f MeshRaycaster::get_closest_point(const Vec3f& point, Vec3f* normal) const
     return closest_point.cast<float>();
 }
 
-
+int MeshRaycaster::get_closest_facet(const Vec3f &point) const
+{
+    int   facet_idx = 0;
+    Vec3d closest_point;
+    m_emesh.squared_distance(point.cast<double>(), facet_idx, closest_point);
+    return facet_idx;
+}
 
 } // namespace GUI
 } // namespace Slic3r

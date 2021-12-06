@@ -7,11 +7,42 @@
 #include "libslic3r/AppConfig.hpp"
 #include <wx/notebook.h>
 #include "Notebook.hpp"
+#include "ButtonsDescription.hpp"
+#include "OG_CustomCtrl.hpp"
 
 namespace Slic3r {
+
+	static t_config_enum_names enum_names_from_keys_map(const t_config_enum_values& enum_keys_map)
+	{
+		t_config_enum_names names;
+		int cnt = 0;
+		for (const auto& kvp : enum_keys_map)
+			cnt = std::max(cnt, kvp.second);
+		cnt += 1;
+		names.assign(cnt, "");
+		for (const auto& kvp : enum_keys_map)
+			names[kvp.second] = kvp.first;
+		return names;
+	}
+
+#define CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(NAME) \
+    static t_config_enum_names s_keys_names_##NAME = enum_names_from_keys_map(s_keys_map_##NAME); \
+    template<> const t_config_enum_values& ConfigOptionEnum<NAME>::get_enum_values() { return s_keys_map_##NAME; } \
+    template<> const t_config_enum_names& ConfigOptionEnum<NAME>::get_enum_names() { return s_keys_names_##NAME; }
+
+
+
+	static const t_config_enum_values s_keys_map_NotifyReleaseMode = {
+		{"all",         NotifyReleaseAll},
+		{"release",     NotifyReleaseOnly},
+		{"none",        NotifyReleaseNone},
+	};
+
+	CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(NotifyReleaseMode)
+
 namespace GUI {
 
-PreferencesDialog::PreferencesDialog(wxWindow* parent, int selected_tab) :
+PreferencesDialog::PreferencesDialog(wxWindow* parent, int selected_tab, const std::string& highlight_opt_key) :
     DPIDialog(parent, wxID_ANY, _L("Preferences"), wxDefaultPosition, 
               wxDefaultSize, wxDEFAULT_DIALOG_STYLE)
 {
@@ -19,6 +50,8 @@ PreferencesDialog::PreferencesDialog(wxWindow* parent, int selected_tab) :
     isOSX = true;
 #endif
 	build(selected_tab);
+	if (!highlight_opt_key.empty())
+		init_highlighter(highlight_opt_key);
 }
 
 static std::shared_ptr<ConfigOptionsGroup>create_options_tab(const wxString& title, wxBookCtrlBase* tabs)
@@ -38,7 +71,7 @@ static std::shared_ptr<ConfigOptionsGroup>create_options_tab(const wxString& tit
 
 static void activate_options_tab(std::shared_ptr<ConfigOptionsGroup> optgroup)
 {
-	optgroup->activate();
+	optgroup->activate([](){}, wxALIGN_RIGHT);
 	optgroup->update_visibility(comSimple);
 	wxBoxSizer* sizer = static_cast<wxBoxSizer*>(static_cast<wxPanel*>(optgroup->parent())->GetSizer());
 	sizer->Add(optgroup->sizer, 0, wxEXPAND | wxALL, 10);
@@ -72,7 +105,7 @@ void PreferencesDialog::build(size_t selected_tab)
 	// Add "General" tab
 	m_optgroup_general = create_options_tab(_L("General"), tabs);
 	m_optgroup_general->m_on_change = [this](t_config_option_key opt_key, boost::any value) {
-		if (opt_key == "default_action_on_close_application" || opt_key == "default_action_on_select_preset")
+		if (opt_key == "default_action_on_close_application" || opt_key == "default_action_on_select_preset" || opt_key == "default_action_on_new_project")
 			m_values[opt_key] = boost::any_cast<bool>(value) ? "none" : "discard";
 		else
 		    m_values[opt_key] = boost::any_cast<bool>(value) ? "1" : "0";
@@ -107,13 +140,7 @@ void PreferencesDialog::build(size_t selected_tab)
 		option = Option(def, "background_processing");
 		m_optgroup_general->append_single_option_line(option);
 
-		// Please keep in sync with ConfigWizard
-		def.label = L("Check for application updates");
-		def.type = coBool;
-		def.tooltip = L("If enabled, PrusaSlicer will check for the new versions of itself online. When a new version becomes available a notification is displayed at the next application startup (never during program usage). This is only a notification mechanisms, no automatic installation is done.");
-		def.set_default_value(new ConfigOptionBool(app_config->get("version_check") == "1"));
-		option = Option(def, "version_check");
-		m_optgroup_general->append_single_option_line(option);
+		m_optgroup_general->append_separator();
 
 		// Please keep in sync with ConfigWizard
 		def.label = L("Export sources full pathnames to 3mf and amf");
@@ -140,6 +167,8 @@ void PreferencesDialog::build(size_t selected_tab)
 		m_optgroup_general->append_single_option_line(option);
 #endif // _WIN32
 
+		m_optgroup_general->append_separator();
+
 		// Please keep in sync with ConfigWizard
 		def.label = L("Update built-in Presets automatically");
 		def.type = coBool;
@@ -164,6 +193,8 @@ void PreferencesDialog::build(size_t selected_tab)
 		option = Option(def, "show_incompatible_presets");
 		m_optgroup_general->append_single_option_line(option);
 
+		m_optgroup_general->append_separator();
+
 		def.label = L("Show drop project dialog");
 		def.type = coBool;
 		def.tooltip = L("When checked, whenever dragging and dropping a project file on the application, shows a dialog asking to select the action to take on the file to load.");
@@ -171,7 +202,6 @@ void PreferencesDialog::build(size_t selected_tab)
 		option = Option(def, "show_drop_project_dialog");
 		m_optgroup_general->append_single_option_line(option);
 
-		
 #if __APPLE__
 		def.label = L("Allow just a single PrusaSlicer instance");
 		def.type = coBool;
@@ -185,18 +215,29 @@ void PreferencesDialog::build(size_t selected_tab)
 		option = Option(def, "single_instance");
 		m_optgroup_general->append_single_option_line(option);
 
-		def.label = L("Ask for unsaved changes when closing application");
+		m_optgroup_general->append_separator();
+
+		def.label = L("Ask to save unsaved changes when closing the application or when loading a new project");
 		def.type = coBool;
-		def.tooltip = L("When closing the application, always ask for unsaved changes");
+		def.tooltip = L("Always ask for unsaved changes, when: \n"
+						"- Closing PrusaSlicer while some presets are modified,\n"
+						"- Loading a new project while some presets are modified");
 		def.set_default_value(new ConfigOptionBool{ app_config->get("default_action_on_close_application") == "none" });
 		option = Option(def, "default_action_on_close_application");
 		m_optgroup_general->append_single_option_line(option);
 
 		def.label = L("Ask for unsaved changes when selecting new preset");
 		def.type = coBool;
-		def.tooltip = L("Always ask for unsaved changes when selecting new preset");
+		def.tooltip = L("Always ask for unsaved changes when selecting new preset or resetting a preset");
 		def.set_default_value(new ConfigOptionBool{ app_config->get("default_action_on_select_preset") == "none" });
 		option = Option(def, "default_action_on_select_preset");
+		m_optgroup_general->append_single_option_line(option);
+
+		def.label = L("Ask for unsaved changes when creating new project");
+		def.type = coBool;
+		def.tooltip = L("Always ask for unsaved changes when creating new project");
+		def.set_default_value(new ConfigOptionBool{ app_config->get("default_action_on_new_project") == "none" });
+		option = Option(def, "default_action_on_new_project");
 		m_optgroup_general->append_single_option_line(option);
 	}
 #ifdef _WIN32
@@ -220,12 +261,22 @@ void PreferencesDialog::build(size_t selected_tab)
 	m_optgroup_general->append_single_option_line(option);
 #endif
 
+	m_optgroup_general->append_separator();
+
     // Show/Hide splash screen
 	def.label = L("Show splash screen");
 	def.type = coBool;
 	def.tooltip = L("Show splash screen");
 	def.set_default_value(new ConfigOptionBool{ app_config->get("show_splash_screen") == "1" });
 	option = Option(def, "show_splash_screen");
+	m_optgroup_general->append_single_option_line(option);
+
+    // Clear Undo / Redo stack on new project
+	def.label = L("Clear Undo / Redo stack on new project");
+	def.type = coBool;
+	def.tooltip = L("Clear Undo / Redo stack on new project or when an existing project is loaded.");
+	def.set_default_value(new ConfigOptionBool{ app_config->get("clear_undo_redo_stack_on_new_project") == "1" });
+	option = Option(def, "clear_undo_redo_stack_on_new_project");
 	m_optgroup_general->append_single_option_line(option);
 
 #if defined(_WIN32) || defined(__APPLE__)
@@ -273,7 +324,15 @@ void PreferencesDialog::build(size_t selected_tab)
 	m_optgroup_gui->m_on_change = [this, tabs](t_config_option_key opt_key, boost::any value) {
         if (opt_key == "suppress_hyperlinks")
             m_values[opt_key] = boost::any_cast<bool>(value) ? "1" : "";
-        else
+		else if (opt_key == "notify_release") {
+			int val_int = boost::any_cast<int>(value);
+			for (const auto& item : s_keys_map_NotifyReleaseMode) {
+				if (item.second == val_int) {
+					m_values[opt_key] = item.first;
+					break;
+				}
+			}
+		} else
             m_values[opt_key] = boost::any_cast<bool>(value) ? "1" : "0";
 
 		if (opt_key == "use_custom_toolbar_size") {
@@ -325,14 +384,6 @@ void PreferencesDialog::build(size_t selected_tab)
 		m_optgroup_gui->append_single_option_line(option);
 
 #ifdef _MSW_DARK_MODE
-		def.label = L("Use Dark color mode (experimental)");
-		def.type = coBool;
-		def.tooltip = L("If enabled, UI will use Dark mode colors. "
-						"If disabled, old UI will be used.");
-		def.set_default_value(new ConfigOptionBool{ app_config->get("dark_color_mode") == "1" });
-		option = Option(def, "dark_color_mode");
-		m_optgroup_gui->append_single_option_line(option);
-
 		def.label = L("Set settings tabs as menu items (experimental)");
 		def.type = coBool;
 		def.tooltip = L("If enabled, Settings Tabs will be placed as menu items. "
@@ -341,7 +392,9 @@ void PreferencesDialog::build(size_t selected_tab)
 		option = Option(def, "tabs_as_menu");
 		m_optgroup_gui->append_single_option_line(option);
 #endif
-		
+
+		m_optgroup_gui->append_separator();
+
 		def.label = L("Show \"Tip of the day\" notification after start");
 		def.type = coBool;
 		def.tooltip = L("If enabled, useful hints are displayed at startup.");
@@ -349,15 +402,39 @@ void PreferencesDialog::build(size_t selected_tab)
 		option = Option(def, "show_hints");
 		m_optgroup_gui->append_single_option_line(option);
 
+		ConfigOptionDef def_enum;
+		def_enum.label = L("Notify about new releases");
+		def_enum.type = coEnum;
+		def_enum.tooltip = L("You will be notified about new release after startup acordingly: All = Regular release and alpha / beta releases. Release only = regular release.");
+		def_enum.enum_keys_map = &ConfigOptionEnum<NotifyReleaseMode>::get_enum_values();
+		def_enum.enum_values.push_back("all");
+		def_enum.enum_values.push_back("release");
+		def_enum.enum_values.push_back("none");
+		def_enum.enum_labels.push_back(L("All"));
+		def_enum.enum_labels.push_back(L("Release only"));
+		def_enum.enum_labels.push_back(L("None"));
+		def_enum.mode = comSimple;
+		def_enum.set_default_value(new ConfigOptionEnum<NotifyReleaseMode>(static_cast<NotifyReleaseMode>(s_keys_map_NotifyReleaseMode.at(app_config->get("notify_release")))));
+		option = Option(def_enum, "notify_release");
+		m_optgroup_gui->append_single_option_line(option);
+
+		m_optgroup_gui->append_separator();
+
 		def.label = L("Use custom size for toolbar icons");
 		def.type = coBool;
 		def.tooltip = L("If enabled, you can change size of toolbar icons manually.");
 		def.set_default_value(new ConfigOptionBool{ app_config->get("use_custom_toolbar_size") == "1" });
 		option = Option(def, "use_custom_toolbar_size");
 		m_optgroup_gui->append_single_option_line(option);	
+
 	}
 
 	activate_options_tab(m_optgroup_gui);
+	// set Field for notify_release to its value to activate the object
+	if (is_editor) {
+		boost::any val = s_keys_map_NotifyReleaseMode.at(app_config->get("notify_release"));
+		m_optgroup_gui->get_field("notify_release")->set_value(val, false);
+	}
 
 	if (is_editor) {
 		create_icon_size_slider();
@@ -386,6 +463,42 @@ void PreferencesDialog::build(size_t selected_tab)
 	}
 #endif // ENABLE_ENVIRONMENT_MAP
 
+#ifdef _WIN32
+	// Add "Dark Mode" tab
+	{
+		// Add "Dark Mode" tab
+		m_optgroup_dark_mode = create_options_tab(_L("Dark mode (experimental)"), tabs);
+		m_optgroup_dark_mode->m_on_change = [this](t_config_option_key opt_key, boost::any value) {
+			m_values[opt_key] = boost::any_cast<bool>(value) ? "1" : "0";
+		};
+
+		def.label = L("Enable dark mode");
+		def.type = coBool;
+		def.tooltip = L("If enabled, UI will use Dark mode colors. "
+			"If disabled, old UI will be used.");
+		def.set_default_value(new ConfigOptionBool{ app_config->get("dark_color_mode") == "1" });
+		option = Option(def, "dark_color_mode");
+		m_optgroup_dark_mode->append_single_option_line(option);
+
+		if (wxPlatformInfo::Get().GetOSMajorVersion() >= 10) // Use system menu just for Window newer then Windows 10
+															 // Use menu with ownerdrawn items by default on systems older then Windows 10
+		{
+			def.label = L("Use system menu for application");
+			def.type = coBool;
+			def.tooltip = L("If enabled, application will use the standart Windows system menu,\n"
+				"but on some combination of display scales it can looks ugly. If disabled, old UI will be used.");
+			def.set_default_value(new ConfigOptionBool{ app_config->get("sys_menu_enabled") == "1" });
+			option = Option(def, "sys_menu_enabled");
+			m_optgroup_dark_mode->append_single_option_line(option);
+		}
+
+		activate_options_tab(m_optgroup_dark_mode);
+	}
+#endif //_WIN32
+
+	// update alignment of the controls for all tabs
+	update_ctrls_alignment();
+
 	if (selected_tab < tabs->GetPageCount())
 		tabs->SetSelection(selected_tab);
 
@@ -395,7 +508,8 @@ void PreferencesDialog::build(size_t selected_tab)
 	auto buttons = CreateStdDialogButtonSizer(wxOK | wxCANCEL);
 	this->Bind(wxEVT_BUTTON, &PreferencesDialog::accept, this, wxID_OK);
 
-	wxGetApp().UpdateDlgDarkUI(this, true);
+	for (int id : {wxID_OK, wxID_CANCEL})
+		wxGetApp().UpdateDarkUI(static_cast<wxButton*>(FindWindowById(id, this)));
 
 	sizer->Add(buttons, 0, wxALIGN_CENTER_HORIZONTAL | wxBOTTOM | wxTOP, 10);
 
@@ -404,20 +518,46 @@ void PreferencesDialog::build(size_t selected_tab)
 	this->CenterOnParent();
 }
 
+std::vector<ConfigOptionsGroup*> PreferencesDialog::optgroups()
+{
+	std::vector<ConfigOptionsGroup*> out;
+	out.reserve(4);
+	for (ConfigOptionsGroup* opt : { m_optgroup_general.get(), m_optgroup_camera.get(), m_optgroup_gui.get()
+#ifdef _WIN32
+		, m_optgroup_dark_mode.get()
+#endif // _WIN32
+		})
+		if (opt)
+			out.emplace_back(opt);
+	return out;
+}
+
+void PreferencesDialog::update_ctrls_alignment()
+{
+	int max_ctrl_width{ 0 };
+	for (ConfigOptionsGroup* og : this->optgroups())
+		if (int max = og->custom_ctrl->get_max_win_width();
+			max_ctrl_width < max)
+			max_ctrl_width = max;
+	if (max_ctrl_width)
+		for (ConfigOptionsGroup* og : this->optgroups())
+			og->custom_ctrl->set_max_win_width(max_ctrl_width);
+}
+
 void PreferencesDialog::accept(wxEvent&)
 {
 //	if (m_values.find("no_defaults") != m_values.end()
 //		warning_catcher(this, wxString::Format(_L("You need to restart %s to make the changes effective."), SLIC3R_APP_NAME));
 
-	std::vector<std::string> options_to_recreate_GUI = { "no_defaults", "tabs_as_menu" };
+	std::vector<std::string> options_to_recreate_GUI = { "no_defaults", "tabs_as_menu", "sys_menu_enabled" };
 
 	for (const std::string& option : options_to_recreate_GUI) {
 		if (m_values.find(option) != m_values.end()) {
 			wxString title = wxGetApp().is_editor() ? wxString(SLIC3R_APP_NAME) : wxString(GCODEVIEWER_APP_NAME);
 			title += " - " + _L("Changes for the critical options");
 			MessageDialog dialog(nullptr,
-				_L("Changing fo some options will trigger application restart.\n"
-				   "You will lose content of the plater.") + "\n\n" +
+				_L("Changing some options will trigger application restart.\n"
+				   "You will lose the content of the plater.") + "\n\n" +
 				_L("Do you want to proceed?"),
 				title,
 				wxICON_QUESTION | wxYES | wxNO);
@@ -472,11 +612,14 @@ void PreferencesDialog::accept(wxEvent&)
 
 	EndModal(wxID_OK);
 
-#ifdef _MSW_DARK_MODE
+#ifdef _WIN32
 	if (m_values.find("dark_color_mode") != m_values.end())
 		wxGetApp().force_colors_update();
-#endif
-
+#ifdef _MSW_DARK_MODE
+	if (m_values.find("sys_menu_enabled") != m_values.end())
+		wxGetApp().force_menu_update();
+#endif //_MSW_DARK_MODE
+#endif // _WIN32
 	if (m_settings_layout_changed)
 		;// application will be recreated after Preference dialog will be destroyed
 	else
@@ -486,9 +629,8 @@ void PreferencesDialog::accept(wxEvent&)
 
 void PreferencesDialog::on_dpi_changed(const wxRect &suggested_rect)
 {
-	m_optgroup_general->msw_rescale();
-	m_optgroup_camera->msw_rescale();
-	m_optgroup_gui->msw_rescale();
+	for (ConfigOptionsGroup* og : this->optgroups())
+		og->msw_rescale();
 
     msw_buttons_rescale(this, em_unit(), { wxID_OK, wxID_CANCEL });
 
@@ -617,8 +759,8 @@ void PreferencesDialog::create_settings_mode_widget()
             m_values["old_settings_layout_mode"] = (id == 0) ? "1" : "0";
 #ifdef _MSW_DARK_MODE
 			if (!disable_new_layout)
-            m_values["new_settings_layout_mode"] = (id == 1) ? "1" : "0";
 #endif
+            m_values["new_settings_layout_mode"] = (id == 1) ? "1" : "0";
             m_values["dlg_settings_layout_mode"] = (id == dlg_id) ? "1" : "0";
 		});
 		id++;
@@ -633,41 +775,81 @@ void PreferencesDialog::create_settings_text_color_widget()
 {
 	wxWindow* parent = m_optgroup_gui->parent();
 
-	wxStaticBox* stb = new wxStaticBox(parent, wxID_ANY, _L("Text color Settings"));
+	wxStaticBox* stb = new wxStaticBox(parent, wxID_ANY, _L("Text colors"));
 	wxGetApp().UpdateDarkUI(stb);
 	if (!wxOSX) stb->SetBackgroundStyle(wxBG_STYLE_PAINT);
 
 	wxSizer* sizer = new wxStaticBoxSizer(stb, wxVERTICAL);
-	wxFlexGridSizer* grid_sizer = new wxFlexGridSizer(2, 5, 5);
-	sizer->Add(grid_sizer, 0, wxEXPAND);
-
-	auto sys_label = new wxStaticText(parent, wxID_ANY, _L("Value is the same as the system value"));
-	sys_label->SetForegroundColour(wxGetApp().get_label_clr_sys());
-	m_sys_colour = new wxColourPickerCtrl(parent, wxID_ANY, wxGetApp().get_label_clr_sys());
-	wxGetApp().UpdateDarkUI(m_sys_colour->GetPickerCtrl(), true);
-	m_sys_colour->Bind(wxEVT_COLOURPICKER_CHANGED, [this, sys_label](wxCommandEvent&) {
-		sys_label->SetForegroundColour(m_sys_colour->GetColour());
-		sys_label->Refresh();
-	});
-	
-	grid_sizer->Add(m_sys_colour, 0, wxALIGN_CENTRE_VERTICAL);
-	grid_sizer->Add(sys_label, 0, wxALIGN_CENTRE_VERTICAL | wxEXPAND);
-
-	auto mod_label = new wxStaticText(parent, wxID_ANY, _L("Value was changed and is not equal to the system value or the last saved preset"));
-	mod_label->SetForegroundColour(wxGetApp().get_label_clr_modified());
-	m_mod_colour = new wxColourPickerCtrl(parent, wxID_ANY, wxGetApp().get_label_clr_modified());
-	wxGetApp().UpdateDarkUI(m_mod_colour->GetPickerCtrl(), true);
-	m_mod_colour->Bind(wxEVT_COLOURPICKER_CHANGED, [this, mod_label](wxCommandEvent&) {
-		mod_label->SetForegroundColour(m_mod_colour->GetColour());
-		mod_label->Refresh();
-	});
-
-	grid_sizer->Add(m_mod_colour, 0, wxALIGN_CENTRE_VERTICAL);
-	grid_sizer->Add(mod_label, 0, wxALIGN_CENTRE_VERTICAL | wxEXPAND);
+	ButtonsDescription::FillSizerWithTextColorDescriptions(sizer, parent, &m_sys_colour, &m_mod_colour);
 
 	m_optgroup_gui->sizer->Add(sizer, 0, wxEXPAND | wxTOP, em_unit());
 }
 
+void PreferencesDialog::init_highlighter(const t_config_option_key& opt_key)
+{
+	m_highlighter.set_timer_owner(this, 0);
+	this->Bind(wxEVT_TIMER, [this](wxTimerEvent&)
+		{
+			m_highlighter.blink();
+		});
+
+	std::pair<OG_CustomCtrl*, bool*> ctrl = { nullptr, nullptr };
+	for (ConfigOptionsGroup* opt_group : this->optgroups()) {
+		ctrl = opt_group->get_custom_ctrl_with_blinking_ptr(opt_key, -1);
+		if (ctrl.first && ctrl.second) {
+			m_highlighter.init(ctrl);
+			break;
+		}
+	}
+}
+
+void PreferencesDialog::PreferencesHighlighter::set_timer_owner(wxEvtHandler* owner, int timerid/* = wxID_ANY*/)
+{
+	m_timer.SetOwner(owner, timerid);
+}
+
+void PreferencesDialog::PreferencesHighlighter::init(std::pair<OG_CustomCtrl*, bool*> params)
+{
+	if (m_timer.IsRunning())
+		invalidate();
+	if (!params.first || !params.second)
+		return;
+
+	m_timer.Start(300, false);
+
+	m_custom_ctrl = params.first;
+	m_show_blink_ptr = params.second;
+
+	*m_show_blink_ptr = true;
+	m_custom_ctrl->Refresh();
+}
+
+void PreferencesDialog::PreferencesHighlighter::invalidate()
+{
+	m_timer.Stop();
+
+	if (m_custom_ctrl && m_show_blink_ptr) {
+		*m_show_blink_ptr = false;
+		m_custom_ctrl->Refresh();
+		m_show_blink_ptr = nullptr;
+		m_custom_ctrl = nullptr;
+	}
+
+	m_blink_counter = 0;
+}
+
+void PreferencesDialog::PreferencesHighlighter::blink()
+{
+	if (m_custom_ctrl && m_show_blink_ptr) {
+		*m_show_blink_ptr = !*m_show_blink_ptr;
+		m_custom_ctrl->Refresh();
+	}
+	else
+		return;
+
+	if ((++m_blink_counter) == 11)
+		invalidate();
+}
 
 } // GUI
 } // Slic3r

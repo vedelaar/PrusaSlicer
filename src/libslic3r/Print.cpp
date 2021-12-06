@@ -5,7 +5,7 @@
 #include "ClipperUtils.hpp"
 #include "Extruder.hpp"
 #include "Flow.hpp"
-#include "Geometry.hpp"
+#include "Geometry/ConvexHull.hpp"
 #include "I18N.hpp"
 #include "ShortestPath.hpp"
 #include "SupportMaterial.hpp"
@@ -88,7 +88,9 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
         "filament_cost",
         "filament_spool_weight",
         "first_layer_acceleration",
+        "first_layer_acceleration_over_raft",
         "first_layer_bed_temperature",
+        "first_layer_speed_over_raft",
         "gcode_comments",
         "gcode_label_objects",
         "infill_acceleration",
@@ -159,7 +161,8 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
             || opt_key == "wipe_tower_rotation_angle") {
             steps.emplace_back(psSkirtBrim);
         } else if (
-               opt_key == "nozzle_diameter"
+               opt_key == "first_layer_height"
+            || opt_key == "nozzle_diameter"
             || opt_key == "resolution"
             // Spiral Vase forces different kind of slicing than the normal model:
             // In Spiral Vase mode, holes are closed and only the largest area contour is kept at each layer.
@@ -211,7 +214,8 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
         } else if (
                opt_key == "first_layer_extrusion_width" 
             || opt_key == "min_layer_height"
-            || opt_key == "max_layer_height") {
+            || opt_key == "max_layer_height"
+            || opt_key == "gcode_resolution") {
             osteps.emplace_back(posPerimeters);
             osteps.emplace_back(posInfill);
             osteps.emplace_back(posSupportMaterial);
@@ -394,7 +398,7 @@ bool Print::sequential_print_horizontal_clearance_valid(const Print& print, Poly
 	        convex_hull.translate(instance.shift - print_object->center_offset());
             // if output needed, collect indices (inside convex_hulls_other) of intersecting hulls
             for (size_t i = 0; i < convex_hulls_other.size(); ++i) {
-                if (!intersection((Polygons)convex_hulls_other[i], (Polygons)convex_hull).empty()) {
+                if (! intersection(convex_hulls_other[i], convex_hull).empty()) {
                     if (polygons == nullptr)
                         return false;
                     else {
@@ -430,6 +434,8 @@ static inline bool sequential_print_vertical_clearance_valid(const Print &print)
 	});
     return it == print_instances_ordered.end() || (*it)->print_object->height() <= scale_(print.config().extruder_clearance_height.value);
 }
+
+
 
 // Precondition: Print::validate() requires the Print::apply() to be called its invocation.
 std::string Print::validate(std::string* warning) const
@@ -523,42 +529,11 @@ std::string Print::validate(std::string* warning) const
             }
 
             if (has_custom_layering) {
-                const std::vector<coordf_t> &layer_height_profile_tallest = layer_height_profiles[tallest_object_idx];
                 for (size_t idx_object = 0; idx_object < m_objects.size(); ++ idx_object) {
                     if (idx_object == tallest_object_idx)
                         continue;
-                    const std::vector<coordf_t> &layer_height_profile = layer_height_profiles[idx_object];
-
-                    // The comparison of the profiles is not just about element-wise equality, some layers may not be
-                    // explicitely included. Always remember z and height of last reference layer that in the vector
-                    // and compare to that. In case some layers are in the vectors multiple times, only the last entry is
-                    // taken into account and compared.
-                    size_t i = 0; // index into tested profile
-                    size_t j = 0; // index into reference profile
-                    coordf_t ref_z = -1.;
-                    coordf_t next_ref_z = layer_height_profile_tallest[0];
-                    coordf_t ref_height = -1.;
-                    while (i < layer_height_profile.size()) {
-                        coordf_t this_z = layer_height_profile[i];
-                        // find the last entry with this z
-                        while (i+2 < layer_height_profile.size() && layer_height_profile[i+2] == this_z)
-                            i += 2;
-
-                        coordf_t this_height = layer_height_profile[i+1];
-                        if (ref_height < -1. || next_ref_z < this_z + EPSILON) {
-                            ref_z = next_ref_z;
-                            do { // one layer can be in the vector several times
-                                ref_height = layer_height_profile_tallest[j+1];
-                                if (j+2 >= layer_height_profile_tallest.size())
-                                    break;
-                                j += 2;
-                                next_ref_z = layer_height_profile_tallest[j];
-                            } while (ref_z == next_ref_z);
-                        }
-                        if (std::abs(this_height - ref_height) > EPSILON)
-                            return L("The Wipe tower is only supported if all objects have the same variable layer height");
-                        i += 2;
-                    }
+                    if (layer_height_profiles[idx_object] != layer_height_profiles[tallest_object_idx])
+                        return L("The Wipe tower is only supported if all objects have the same variable layer height");
                 }
             }
         }
@@ -809,7 +784,7 @@ void Print::auto_assign_extruders(ModelObject* model_object) const
 // Slicing process, running at a background thread.
 void Print::process()
 {
-    name_tbb_thread_pool_threads();
+    name_tbb_thread_pool_threads_set_locale();
 
     BOOST_LOG_TRIVIAL(info) << "Starting the slicing process." << log_memory_info();
     for (PrintObject *obj : m_objects)
@@ -876,7 +851,7 @@ void Print::process()
 // The export_gcode may die for various reasons (fails to process output_filename_format,
 // write error into the G-code, cannot execute post-processing scripts).
 // It is up to the caller to show an error message.
-std::string Print::export_gcode(const std::string& path_template, GCodeProcessor::Result* result, ThumbnailsGeneratorCallback thumbnail_cb)
+std::string Print::export_gcode(const std::string& path_template, GCodeProcessorResult* result, ThumbnailsGeneratorCallback thumbnail_cb)
 {
     // output everything to a G-code file
     // The following call may die if the output_filename_format template substitution fails.
@@ -1165,7 +1140,7 @@ void Print::_make_wipe_tower()
                 // Insert the new support layer.
                 double height    = lt.print_z - (i == 0 ? 0. : m_wipe_tower_data.tool_ordering.layer_tools()[i-1].print_z);
                 //FIXME the support layer ID is set to -1, as Vojtech hopes it is not being used anyway.
-                it_layer = m_objects.front()->insert_support_layer(it_layer, -1, height, lt.print_z, lt.print_z - 0.5 * height);
+                it_layer = m_objects.front()->insert_support_layer(it_layer, -1, 0, height, lt.print_z, lt.print_z - 0.5 * height);
                 ++ it_layer;
             }
         }

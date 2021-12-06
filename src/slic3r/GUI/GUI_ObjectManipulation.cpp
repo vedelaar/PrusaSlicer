@@ -1,5 +1,4 @@
 #include "GUI_ObjectManipulation.hpp"
-#include "GUI_ObjectList.hpp"
 #include "I18N.hpp"
 #include "BitmapComboBox.hpp"
 
@@ -132,7 +131,7 @@ ObjectManipulation::ObjectManipulation(wxWindow* parent) :
                     return;
 
                 wxGetApp().obj_list()->fix_through_netfabb();
-                update_warning_icon_state(wxGetApp().obj_list()->get_mesh_errors_list());
+                update_warning_icon_state(wxGetApp().obj_list()->get_mesh_errors_info());
             });
 
     sizer->Add(m_fix_throught_netfab_bitmap);
@@ -497,14 +496,19 @@ void ObjectManipulation::update_ui_from_settings()
         int axis_id = 0;
         for (ManipulationEditor* editor : m_editors) {
 //            editor->SetForegroundColour(m_use_colors ? wxColour(axes_color_text[axis_id]) : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT));
-#ifdef _WIN32
-            if (m_use_colors)
+            if (m_use_colors) {
                 editor->SetBackgroundColour(wxColour(axes_color_back[axis_id]));
-            else
+                if (wxGetApp().dark_mode())
+                    editor->SetForegroundColour(*wxBLACK);
+            }
+            else {
+#ifdef _WIN32
                 wxGetApp().UpdateDarkUI(editor);
 #else
-            editor->SetBackgroundColour(m_use_colors ? wxColour(axes_color_back[axis_id]) : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+                editor->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+                editor->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT));
 #endif /* _WIN32 */
+            }
             editor->Refresh();
             if (++axis_id == 3)
                 axis_id = 0;
@@ -543,8 +547,8 @@ void ObjectManipulation::update_settings_value(const Selection& selection)
 		} 
         else {
 			m_new_rotation = volume->get_instance_rotation() * (180. / M_PI);
-			m_new_size     = volume->get_instance_transformation().get_scaling_factor().cwiseProduct(wxGetApp().model().objects[volume->object_idx()]->raw_mesh_bounding_box().size());
-			m_new_scale    = volume->get_instance_scaling_factor() * 100.;
+            m_new_size = volume->get_instance_scaling_factor().cwiseProduct(wxGetApp().model().objects[volume->object_idx()]->raw_mesh_bounding_box().size());
+            m_new_scale    = volume->get_instance_scaling_factor() * 100.;
 		}
 
         m_new_enabled  = true;
@@ -565,7 +569,7 @@ void ObjectManipulation::update_settings_value(const Selection& selection)
         m_new_position = volume->get_volume_offset();
         m_new_rotation = volume->get_volume_rotation() * (180. / M_PI);
         m_new_scale    = volume->get_volume_scaling_factor() * 100.;
-        m_new_size     = volume->get_instance_transformation().get_scaling_factor().cwiseProduct(volume->get_volume_transformation().get_scaling_factor().cwiseProduct(volume->bounding_box().size()));
+        m_new_size = volume->get_instance_scaling_factor().cwiseProduct(volume->get_volume_scaling_factor().cwiseProduct(volume->bounding_box().size()));
         m_new_enabled = true;
     }
     else if (obj_list->multiple_selection() || obj_list->is_selected(itInstanceRoot)) {
@@ -631,7 +635,6 @@ void ObjectManipulation::update_if_dirty()
         update(m_cache.rotation, m_cache.rotation_rounded, meRotation, m_new_rotation);
     }
 
-
     if (selection.requires_uniform_scale()) {
         m_lock_bnt->SetLock(true);
         m_lock_bnt->SetToolTip(_L("You cannot use non-uniform scaling mode for multiple objects/parts selection"));
@@ -654,8 +657,10 @@ void ObjectManipulation::update_if_dirty()
     else
         m_og->disable();
 
-    update_reset_buttons_visibility();
-    update_mirror_buttons_visibility();
+    if (!selection.is_dragging()) {
+        update_reset_buttons_visibility();
+      update_mirror_buttons_visibility();
+    }
 
     m_dirty = false;
 }
@@ -776,8 +781,12 @@ void ObjectManipulation::update_item_name(const wxString& item_name)
     m_item_name->SetLabel(item_name);
 }
 
-void ObjectManipulation::update_warning_icon_state(const wxString& tooltip)
-{
+void ObjectManipulation::update_warning_icon_state(const MeshErrorsInfo& warning)
+{   
+    if (const std::string& warning_icon_name = warning.warning_icon_name;
+        !warning_icon_name.empty())
+        m_manifold_warning_bmp = ScalableBitmap(m_parent, warning_icon_name);
+    const wxString& tooltip = warning.tooltip;
     m_fix_throught_netfab_bitmap->SetBitmap(tooltip.IsEmpty() ? wxNullBitmap : m_manifold_warning_bmp.bmp());
     m_fix_throught_netfab_bitmap->SetMinSize(tooltip.IsEmpty() ? wxSize(0,0) : m_manifold_warning_bmp.bmp().GetSize());
     m_fix_throught_netfab_bitmap->SetToolTip(tooltip);
@@ -807,6 +816,7 @@ void ObjectManipulation::change_position_value(int axis, double value)
     Selection& selection = canvas->get_selection();
     selection.start_dragging();
     selection.translate(position - m_cache.position, selection.requires_local_axes());
+    selection.stop_dragging();
     canvas->do_move(L("Set Position"));
 
     m_cache.position = position;
@@ -838,6 +848,7 @@ void ObjectManipulation::change_rotation_value(int axis, double value)
 	selection.rotate(
 		(M_PI / 180.0) * (transformation_type.absolute() ? rotation : rotation - m_cache.rotation), 
 		transformation_type);
+    selection.stop_dragging();
     canvas->do_rotate(L("Set Orientation"));
 
     m_cache.rotation = rotation;
@@ -847,13 +858,16 @@ void ObjectManipulation::change_rotation_value(int axis, double value)
 
 void ObjectManipulation::change_scale_value(int axis, double value)
 {
+    if (value <= 0.0)
+        return;
+
     if (std::abs(m_cache.scale_rounded(axis) - value) < EPSILON)
         return;
 
     Vec3d scale = m_cache.scale;
 	scale(axis) = value;
 
-    this->do_scale(axis, scale);
+    this->do_scale(axis, 0.01 * scale);
 
     m_cache.scale = scale;
 	m_cache.scale_rounded(axis) = DBL_MAX;
@@ -863,6 +877,9 @@ void ObjectManipulation::change_scale_value(int axis, double value)
 
 void ObjectManipulation::change_size_value(int axis, double value)
 {
+    if (value <= 0.0)
+        return;
+
     if (std::abs(m_cache.size_rounded(axis) - value) < EPSILON)
         return;
 
@@ -872,14 +889,21 @@ void ObjectManipulation::change_size_value(int axis, double value)
     const Selection& selection = wxGetApp().plater()->canvas3D()->get_selection();
 
     Vec3d ref_size = m_cache.size;
-	if (selection.is_single_volume() || selection.is_single_modifier())
-        ref_size = selection.get_volume(*selection.get_volume_idxs().begin())->bounding_box().size();
+    if (selection.is_single_volume() || selection.is_single_modifier()) {
+        const GLVolume* v = selection.get_volume(*selection.get_volume_idxs().begin());
+        const Vec3d local_size = size.cwiseQuotient(v->get_instance_scaling_factor());
+        const Vec3d local_ref_size = v->bounding_box().size().cwiseProduct(v->get_volume_scaling_factor());
+        const Vec3d local_change = local_size.cwiseQuotient(local_ref_size);
+
+        size = local_change.cwiseProduct(v->get_volume_scaling_factor());
+        ref_size = Vec3d::Ones();
+    }
     else if (selection.is_single_full_instance())
 		ref_size = m_world_coordinates ? 
             selection.get_unscaled_instance_bounding_box().size() :
             wxGetApp().model().objects[selection.get_volume(*selection.get_volume_idxs().begin())->object_idx()]->raw_mesh_bounding_box().size();
 
-    this->do_scale(axis, 100. * Vec3d(size(0) / ref_size(0), size(1) / ref_size(1), size(2) / ref_size(2)));
+    this->do_scale(axis, size.cwiseQuotient(ref_size));
 
     m_cache.size = size;
 	m_cache.size_rounded(axis) = DBL_MAX;
@@ -902,7 +926,8 @@ void ObjectManipulation::do_scale(int axis, const Vec3d &scale) const
         scaling_factor = scale(axis) * Vec3d::Ones();
 
     selection.start_dragging();
-    selection.scale(scaling_factor * 0.01, transformation_type);
+    selection.scale(scaling_factor, transformation_type);
+    selection.stop_dragging();
     wxGetApp().plater()->canvas3D()->do_scale(L("Set Scale"));
 }
 
@@ -918,10 +943,26 @@ void ObjectManipulation::on_change(const std::string& opt_key, int axis, double 
         change_position_value(axis, new_value);
     else if (opt_key == "rotation")
         change_rotation_value(axis, new_value);
-    else if (opt_key == "scale")
-        change_scale_value(axis, new_value);
-    else if (opt_key == "size")
-        change_size_value(axis, new_value);
+    else if (opt_key == "scale") {
+        if (new_value > 0.0)
+            change_scale_value(axis, new_value);
+        else {
+            new_value = m_cache.scale(axis);
+            m_cache.scale(axis) = 0.0;
+            m_cache.scale_rounded(axis) = DBL_MAX;
+            change_scale_value(axis, new_value);
+        }
+    }
+    else if (opt_key == "size") {
+        if (new_value > 0.0)
+            change_size_value(axis, new_value);
+        else {
+            new_value = m_cache.size(axis);
+            m_cache.size(axis) = 0.0;
+            m_cache.size_rounded(axis) = DBL_MAX;
+            change_size_value(axis, new_value);
+        }
+    }
 }
 
 void ObjectManipulation::set_uniform_scaling(const bool new_value)
@@ -1005,10 +1046,10 @@ void ObjectManipulation::sys_color_changed()
     get_og()->sys_color_changed();
     wxGetApp().UpdateDarkUI(m_word_local_combo);
     wxGetApp().UpdateDarkUI(m_check_inch);
-
+#endif
     for (ManipulationEditor* editor : m_editors)
         editor->sys_color_changed(this);
-#endif
+
     // btn...->msw_rescale() updates icon on button, so use it
     m_mirror_bitmap_on.msw_rescale();
     m_mirror_bitmap_off.msw_rescale();
@@ -1041,6 +1082,7 @@ ManipulationEditor::ManipulationEditor(ObjectManipulation* parent,
 #endif // __WXOSX__
     if (parent->use_colors()) {
         this->SetBackgroundColour(wxColour(axes_color_back[axis]));
+        this->SetForegroundColour(*wxBLACK);
     } else {
         wxGetApp().UpdateDarkUI(this);
     }
@@ -1093,10 +1135,14 @@ void ManipulationEditor::msw_rescale()
 
 void ManipulationEditor::sys_color_changed(ObjectManipulation* parent)
 {
-    if (!parent->use_colors())
-        wxGetApp().UpdateDarkUI(this);
-    else
+    if (parent->use_colors())
         SetForegroundColour(*wxBLACK);
+    else
+#ifdef _WIN32
+        wxGetApp().UpdateDarkUI(this);
+#else
+        SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT));
+#endif // _WIN32
 }
 
 double ManipulationEditor::get_value()

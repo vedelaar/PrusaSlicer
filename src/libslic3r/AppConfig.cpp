@@ -71,8 +71,6 @@ void AppConfig::set_defaults()
         if (get("drop_project_action").empty())
             set("drop_project_action", "1");
 
-        if (get("version_check").empty())
-            set("version_check", "1");
         if (get("preset_update").empty())
             set("preset_update", "1");
 
@@ -84,9 +82,6 @@ void AppConfig::set_defaults()
             set("associate_3mf", "0");
         if (get("associate_stl").empty())
             set("associate_stl", "0");
-
-        if (get("dark_color_mode").empty())
-            set("dark_color_mode", "0");
 
         if (get("tabs_as_menu").empty())
             set("tabs_as_menu", "0");
@@ -124,6 +119,9 @@ void AppConfig::set_defaults()
 
         if (get("auto_toolbar_size").empty())
             set("auto_toolbar_size", "100");
+ 
+       if (get("notify_release").empty())
+           set("notify_release", "all"); // or "none" or "release"
 
 #if ENABLE_ENVIRONMENT_MAP
         if (get("use_environment_map").empty())
@@ -139,11 +137,17 @@ void AppConfig::set_defaults()
         if (get("default_action_on_select_preset").empty())
             set("default_action_on_select_preset", "none");     // , "transfer", "discard" or "save" 
 
+        if (get("default_action_on_new_project").empty())
+            set("default_action_on_new_project", "none");       // , "keep(transfer)", "discard" or "save" 
+
         if (get("color_mapinulation_panel").empty())
             set("color_mapinulation_panel", "0");
 
         if (get("order_volumes").empty())
             set("order_volumes", "1");
+
+        if (get("clear_undo_redo_stack_on_new_project").empty())
+            set("clear_undo_redo_stack_on_new_project", "1");
     }
     else {
 #ifdef _WIN32
@@ -167,15 +171,21 @@ void AppConfig::set_defaults()
     if (get("show_splash_screen").empty())
         set("show_splash_screen", "1");
 
-    if (get("last_hint").empty())
-        set("last_hint", "0");
-
     if (get("show_hints").empty())
         set("show_hints", "1");
+
+    if (get("allow_ip_resolve").empty())
+        set("allow_ip_resolve", "1");
 
 #ifdef _WIN32
     if (get("use_legacy_3DConnexion").empty())
         set("use_legacy_3DConnexion", "0");
+
+    if (get("dark_color_mode").empty())
+        set("dark_color_mode", "0");
+
+    if (get("sys_menu_enabled").empty())
+        set("sys_menu_enabled", "1");
 #endif // _WIN32
 
     // Remove legacy window positions/sizes
@@ -242,11 +252,11 @@ std::string AppConfig::load()
     bool                    recovered = false;
 
     try {
-        ifs.open(AppConfig::config_path());
+        ifs.open(AppConfig::loading_path());
 #ifdef WIN32
         // Verify the checksum of the config file without taking just for debugging purpose.
         if (!verify_config_file_checksum(ifs))
-            BOOST_LOG_TRIVIAL(info) << "The configuration file " << AppConfig::config_path() <<
+            BOOST_LOG_TRIVIAL(info) << "The configuration file " << AppConfig::loading_path() <<
             " has a wrong MD5 checksum or the checksum is missing. This may indicate a file corruption or a harmless user edit.";
 
         ifs.seekg(0, boost::nowide::ifstream::beg);
@@ -256,32 +266,32 @@ std::string AppConfig::load()
 #ifdef WIN32
         // The configuration file is corrupted, try replacing it with the backup configuration.
         ifs.close();
-        std::string backup_path = (boost::format("%1%.bak") % AppConfig::config_path()).str();
+        std::string backup_path = (boost::format("%1%.bak") % AppConfig::loading_path()).str();
         if (boost::filesystem::exists(backup_path)) {
             // Compute checksum of the configuration backup file and try to load configuration from it when the checksum is correct.
             boost::nowide::ifstream backup_ifs(backup_path);
             if (!verify_config_file_checksum(backup_ifs)) {
-                BOOST_LOG_TRIVIAL(error) << format("Both \"%1%\" and \"%2%\" are corrupted. It isn't possible to restore configuration from the backup.", AppConfig::config_path(), backup_path);
+                BOOST_LOG_TRIVIAL(error) << format("Both \"%1%\" and \"%2%\" are corrupted. It isn't possible to restore configuration from the backup.", AppConfig::loading_path(), backup_path);
                 backup_ifs.close();
                 boost::filesystem::remove(backup_path);
-            } else if (std::string error_message; copy_file(backup_path, AppConfig::config_path(), error_message, false) != SUCCESS) {
-                BOOST_LOG_TRIVIAL(error) << format("Configuration file \"%1%\" is corrupted. Failed to restore from backup \"%2%\": %3%", AppConfig::config_path(), backup_path, error_message);
+            } else if (std::string error_message; copy_file(backup_path, AppConfig::loading_path(), error_message, false) != SUCCESS) {
+                BOOST_LOG_TRIVIAL(error) << format("Configuration file \"%1%\" is corrupted. Failed to restore from backup \"%2%\": %3%", AppConfig::loading_path(), backup_path, error_message);
                 backup_ifs.close();
                 boost::filesystem::remove(backup_path);
             } else {
-                BOOST_LOG_TRIVIAL(info) << format("Configuration file \"%1%\" was corrupted. It has been succesfully restored from the backup \"%2%\".", AppConfig::config_path(), backup_path);
+                BOOST_LOG_TRIVIAL(info) << format("Configuration file \"%1%\" was corrupted. It has been succesfully restored from the backup \"%2%\".", AppConfig::loading_path(), backup_path);
                 // Try parse configuration file after restore from backup.
                 try {
-                    ifs.open(AppConfig::config_path());
+                    ifs.open(AppConfig::loading_path());
                     pt::read_ini(ifs, tree);
                     recovered = true;
                 } catch (pt::ptree_error& ex) {
-                    BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\" after it has been restored from backup: %2%", AppConfig::config_path(), ex.what());
+                    BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\" after it has been restored from backup: %2%", AppConfig::loading_path(), ex.what());
                 }
             }
         } else
 #endif // WIN32
-            BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\": %2%", AppConfig::config_path(), ex.what());
+            BOOST_LOG_TRIVIAL(info) << format("Failed to parse configuration file \"%1%\": %2%", AppConfig::loading_path(), ex.what());
         if (! recovered) {
             // Report the initial error of parsing PrusaSlicer.ini.
             // Error while parsing config file. We'll customize the error message and rethrow to be displayed.

@@ -5,6 +5,8 @@
 #include "3DScene.hpp"
 #include "GLModel.hpp"
 
+#include <libslic3r/BuildVolume.hpp>
+
 #include <tuple>
 #include <array>
 
@@ -62,20 +64,22 @@ class Bed3D
     };
 
 public:
-    enum EType : unsigned char
+    enum class Type : unsigned char
     {
+        // The print bed model and texture are available from some printer preset.
         System,
-        Custom,
-        Num_Types
+        // The print bed model is unknown, thus it is rendered procedurally.
+        Custom
     };
 
 private:
-    EType m_type{ Custom };
-    Pointfs m_shape;
+    BuildVolume m_build_volume;
+    Type m_type{ Type::Custom };
     std::string m_texture_filename;
     std::string m_model_filename;
-    BoundingBoxf3 m_bounding_box;
+    // Print volume bounding box exteded with axes and model.
     BoundingBoxf3 m_extended_bounding_box;
+    // Slightly expanded print bed polygon, for collision detection.
     Polygon m_polygon;
     GeometryBuffer m_triangles;
     GeometryBuffer m_gridlines;
@@ -91,33 +95,39 @@ private:
 
 public:
     Bed3D() = default;
-    ~Bed3D() { reset(); }
+    ~Bed3D() { release_VBOs(); }
 
-    EType get_type() const { return m_type; }
-
-    bool is_custom() const { return m_type == Custom; }
-
-    const Pointfs& get_shape() const { return m_shape; }
+    // Update print bed model from configuration.
     // Return true if the bed shape changed, so the calee will update the UI.
-    bool set_shape(const Pointfs& shape, const std::string& custom_texture, const std::string& custom_model, bool force_as_custom = false);
+    //FIXME if the build volume max print height is updated, this function still returns zero
+    // as this class does not use it, thus there is no need to update the UI.
+    bool set_shape(const Pointfs& bed_shape, const double max_print_height, const std::string& custom_texture, const std::string& custom_model, bool force_as_custom = false);
 
-    const BoundingBoxf3& get_bounding_box(bool extended) const {
-        return extended ? m_extended_bounding_box : m_bounding_box;
-    }
+    // Build volume geometry for various collision detection tasks.
+    const BuildVolume& build_volume() const { return m_build_volume; }
 
+    // Was the model provided, or was it generated procedurally?
+    Type get_type() const { return m_type; }
+    // Was the model generated procedurally?
+    bool is_custom() const { return m_type == Type::Custom; }
+
+    // Bounding box around the print bed, axes and model, for rendering.
+    const BoundingBoxf3& extended_bounding_box() const { return m_extended_bounding_box; }
+
+    // Check against an expanded 2d bounding box.
+    //FIXME shall one check against the real build volume?
     bool contains(const Point& point) const;
     Point point_projection(const Point& point) const;
 
-    void render(GLCanvas3D& canvas, bool bottom, float scale_factor,
-        bool show_axes, bool show_texture);
-
+    void render(GLCanvas3D& canvas, bool bottom, float scale_factor, bool show_axes, bool show_texture);
     void render_for_picking(GLCanvas3D& canvas, bool bottom, float scale_factor);
 
 private:
-    void calc_bounding_boxes() const;
+    // Calculate an extended bounding box from axes and current model for visualization purposes.
+    BoundingBoxf3 calc_extended_bounding_box() const;
     void calc_triangles(const ExPolygon& poly);
     void calc_gridlines(const ExPolygon& poly, const BoundingBox& bed_bbox);
-    std::tuple<EType, std::string, std::string> detect_type(const Pointfs& shape) const;
+    static std::tuple<Type, std::string, std::string> detect_type(const Pointfs& shape);
     void render_internal(GLCanvas3D& canvas, bool bottom, float scale_factor,
         bool show_axes, bool show_texture, bool picking);
     void render_axes() const;
@@ -126,7 +136,7 @@ private:
     void render_model() const;
     void render_custom(GLCanvas3D& canvas, bool bottom, bool show_texture, bool picking) const;
     void render_default(bool bottom, bool picking) const;
-    void reset();
+    void release_VBOs();
 };
 
 } // GUI

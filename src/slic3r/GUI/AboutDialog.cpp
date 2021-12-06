@@ -122,7 +122,9 @@ void CopyrightsDialog::fill_entries()
         { "AppImage packaging for Linux using AppImageKit"
                             , "2004-2019 Simon Peter and contributors"      , "https://appimage.org/" },
         { "lib_fts"
-                            , "Forrest Smith"                               , "https://www.forrestthewoods.com/" }
+                            , "Forrest Smith"                               , "https://www.forrestthewoods.com/" },
+        { "fast_float"
+                            , "Daniel Lemire, João Paulo Magalhaes and contributors", "https://github.com/fastfloat/fast_float" }
     };
 }
 
@@ -195,7 +197,7 @@ void CopyrightsDialog::on_dpi_changed(const wxRect &suggested_rect)
 
 void CopyrightsDialog::onLinkClicked(wxHtmlLinkEvent &event)
 {
-    wxLaunchDefaultBrowser(event.GetLinkInfo().GetHref());
+    wxGetApp().open_browser_with_warning_dialog(event.GetLinkInfo().GetHref());
     event.Skip(false);
 }
 
@@ -218,7 +220,7 @@ AboutDialog::AboutDialog()
 	main_sizer->Add(hsizer, 0, wxEXPAND | wxALL, 20);
 
     // logo
-    m_logo_bitmap = ScalableBitmap(this, wxGetApp().is_editor() ? "PrusaSlicer_192px.png" : "PrusaSlicer-gcodeviewer_192px.png", 192);
+    m_logo_bitmap = ScalableBitmap(this, wxGetApp().logo_name(), 192);
     m_logo = new wxStaticBitmap(this, wxID_ANY, m_logo_bitmap.bmp());
 	hsizer->Add(m_logo, 1, wxALIGN_CENTER_VERTICAL);
     
@@ -273,7 +275,7 @@ AboutDialog::AboutDialog()
             "<html>"
             "<body bgcolor= %1% link= %2%>"
             "<font color=%3%>"
-            "%4% &copy; 2016-2020 Prusa Research. <br />"
+            "%4% &copy; 2016-2021 Prusa Research. <br />"
             "%5% &copy; 2011-2018 Alessandro Ranellucci. <br />"
             "<a href=\"http://slic3r.org/\">Slic3r</a> %6% "
             "<a href=\"http://www.gnu.org/licenses/agpl-3.0.html\">%7%</a>."
@@ -344,7 +346,7 @@ void AboutDialog::on_dpi_changed(const wxRect &suggested_rect)
 
 void AboutDialog::onLinkClicked(wxHtmlLinkEvent &event)
 {
-    wxLaunchDefaultBrowser(event.GetLinkInfo().GetHref());
+    wxGetApp().open_browser_with_warning_dialog(event.GetLinkInfo().GetHref());
     event.Skip(false);
 }
 

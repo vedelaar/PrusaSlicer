@@ -16,6 +16,10 @@
 
 #include <boost/algorithm/string.hpp>
 #include "slic3r/Utils/FixModelByWin10.hpp"
+#ifdef __APPLE__
+#include "wx/dcclient.h"
+#include "slic3r/Utils/MacDarkMode.hpp"
+#endif
 
 namespace Slic3r
 {
@@ -211,13 +215,45 @@ static int GetSelectedChoices(  wxArrayInt& selections,
                                 const wxString& caption,
                                 const wxArrayString& choices)
 {
-#ifdef _WIN32
     wxMultiChoiceDialog dialog(nullptr, message, caption, choices);
     wxGetApp().UpdateDlgDarkUI(&dialog);
 
     // call this even if selections array is empty and this then (correctly)
     // deselects the first item which is selected by default
     dialog.SetSelections(selections);
+
+#ifdef __APPLE__
+    // Improvements for ChoiceListBox: Height of control will restect to items count
+    for (auto child : dialog.GetChildren())
+        if (dynamic_cast<wxListBox*>(child) && !choices.IsEmpty()) {
+            wxClientDC dc(child);
+
+            int height = dc.GetTextExtent(choices[0]).y;
+            int width = 0;
+            for (const auto& string : choices)
+                width = std::max(width, dc.GetTextExtent(string).x);
+
+            // calculate best size of ListBox
+            height += 3 * mac_max_scaling_factor(); // extend height by margins
+            width += 3 * height;                   // extend width by checkbox width and margins
+
+            // don't make the listbox too tall (limit height to around 10 items)
+            // but don't make it too small neither
+            int list_height = wxMax(height * wxMin(wxMax(choices.Count(), 3), 10), 70);
+            wxSize sz_best = wxSize(width, list_height);
+
+            wxSize sz = child->GetSize();
+            child->SetMinSize(sz_best);
+
+            // extend Dialog size, if calculated best size of ListBox is bigger then its size
+            wxSize dlg_sz = dialog.GetSize();
+            if (int delta_x = sz_best.x - sz.x; delta_x > 0) dlg_sz.x += delta_x;
+            if (int delta_y = sz_best.y - sz.y; delta_y > 0) dlg_sz.y += delta_y;
+            dialog.SetSize(dlg_sz);
+
+            break;
+        }
+#endif
 
     if (dialog.ShowModal() != wxID_OK)
     {
@@ -229,9 +265,6 @@ static int GetSelectedChoices(  wxArrayInt& selections,
 
     selections = dialog.GetSelections();
     return static_cast<int>(selections.GetCount());
-#else
-    return wxGetSelectedChoices(selections, message, caption, choices);
-#endif
 }
 
 static wxMenu* create_settings_popupmenu(wxMenu* parent_menu, const bool is_object_settings, wxDataViewItem item/*, ModelConfig& config*/)
@@ -451,6 +484,10 @@ void MenuFactory::append_menu_items_add_volume(wxMenu* menu)
             menu->Destroy(settings_id);
     }
 
+    // Update "Height range Modifier" item (delete old & create new)
+    if (const auto range_id = menu->FindItem(_L("Height range Modifier")); range_id != wxNOT_FOUND)
+        menu->Destroy(range_id);
+
     const ConfigOptionMode mode = wxGetApp().get_mode();
 
     if (mode == comAdvanced) {
@@ -480,6 +517,8 @@ void MenuFactory::append_menu_items_add_volume(wxMenu* menu)
         append_submenu(menu, sub_menu, wxID_ANY, _(item.first), "", item.second,
             []() { return obj_list()->is_instance_or_object_selected(); }, m_parent);
     }
+
+    append_menu_item_layers_editing(menu);
 }
 
 wxMenuItem* MenuFactory::append_menu_item_layers_editing(wxMenu* menu)
@@ -656,7 +695,7 @@ wxMenuItem* MenuFactory::append_menu_item_fix_through_netfabb(wxMenu* menu)
         return nullptr;
     wxMenuItem* menu_item = append_menu_item(menu, wxID_ANY, _L("Fix through the Netfabb"), "",
         [](wxCommandEvent&) { obj_list()->fix_through_netfabb(); }, "", menu,
-        []() {return plater()->can_fix_through_netfabb(); }, plater());
+        []() {return plater()->can_fix_through_netfabb(); }, m_parent);
 
     return menu_item;
 }
@@ -665,7 +704,7 @@ wxMenuItem* MenuFactory::append_menu_item_simplify(wxMenu* menu)
 {
     wxMenuItem* menu_item = append_menu_item(menu, wxID_ANY, _L("Simplify model"), "",
         [](wxCommandEvent&) { obj_list()->simplify(); }, "", menu,
-        []() {return plater()->can_simplify(); }, plater());
+        []() {return plater()->can_simplify(); }, m_parent);
     menu->AppendSeparator();
 
     return menu_item;
@@ -746,15 +785,21 @@ void MenuFactory::append_menu_item_change_extruder(wxMenu* menu)
     }
 
     append_submenu(menu, extruder_selection_menu, wxID_ANY, name, _L("Use another extruder"),
-        "edit_uni"/* : "change_extruder"*/, []() {return true; }, GUI::wxGetApp().plater());
+        "edit_uni"/* : "change_extruder"*/, []() {return true; }, m_parent);
 
 //    menu->AppendSubMenu(extruder_selection_menu, name);
 }
 
 void MenuFactory::append_menu_item_scale_selection_to_fit_print_volume(wxMenu* menu)
 {
+#if ENABLE_ENHANCED_PRINT_VOLUME_FIT
+    append_menu_item(menu, wxID_ANY, _L("Scale to print volume"), _L("Scale the selected object to fit the print volume"),
+        [](wxCommandEvent&) { plater()->scale_selection_to_fit_print_volume(); }, "", menu,
+        []() { return plater()->can_scale_to_print_volume(); }, m_parent);
+#else
     append_menu_item(menu, wxID_ANY, _L("Scale to print volume"), _L("Scale the selected object to fit the print volume"),
         [](wxCommandEvent&) { plater()->scale_selection_to_fit_print_volume(); }, "", menu);
+#endif // ENABLE_ENHANCED_PRINT_VOLUME_FIT
 }
 
 void MenuFactory::append_menu_items_convert_unit(wxMenu* menu, int insert_pos/* = 1*/)
@@ -905,11 +950,7 @@ void MenuFactory::create_object_menu()
         []() { return plater()->can_split(true) && wxGetApp().get_mode() > comSimple; }, m_parent);
     m_object_menu.AppendSeparator();
 
-    // Layers Editing for object
-    append_menu_item_layers_editing(&m_object_menu);
-    m_object_menu.AppendSeparator();
-
-    // "Add (volumes)" popupmenu will be added later in append_menu_items_add_volume()
+    // "Height range Modifier" and "Add (volumes)" menu items will be added later in append_menu_items_add_volume()
 }
 
 void MenuFactory::create_sla_object_menu()
@@ -1028,6 +1069,7 @@ wxMenu* MenuFactory::multi_selection_menu()
 
     wxMenu* menu = new MenuWithSeparators();
 
+    append_menu_item_fix_through_netfabb(menu);
     append_menu_item_reload_from_disk(menu);
     append_menu_items_convert_unit(menu);
     if (obj_list()->can_merge_to_multipart_object())

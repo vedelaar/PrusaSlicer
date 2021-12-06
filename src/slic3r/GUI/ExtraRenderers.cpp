@@ -3,6 +3,7 @@
 #include "GUI.hpp"
 #include "I18N.hpp"
 #include "BitmapComboBox.hpp"
+#include "Plater.hpp"
 
 #include <wx/dc.h>
 #ifdef wxHAS_GENERIC_DATAVIEWCTRL
@@ -197,6 +198,17 @@ wxWindow* BitmapTextRenderer::CreateEditorCtrl(wxWindow* parent, wxRect labelRec
         labelRect.SetWidth(labelRect.GetWidth() - bmp_width);
     }
 
+#ifdef __WXMSW__
+    // Case when from some reason we try to create next EditorCtrl till old one was not deleted
+    if (auto children = parent->GetChildren(); children.GetCount() > 0)
+        for (auto child : children)
+            if (dynamic_cast<wxTextCtrl*>(child)) {
+                parent->RemoveChild(child);
+                child->Destroy();
+                break;
+            }
+#endif // __WXMSW__
+
     wxTextCtrl* text_editor = new wxTextCtrl(parent, wxID_ANY, data.GetText(),
                                              position, labelRect.GetSize(), wxTE_PROCESS_ENTER);
     text_editor->SetInsertionPointEnd();
@@ -211,14 +223,9 @@ bool BitmapTextRenderer::GetValueFromEditorCtrl(wxWindow* ctrl, wxVariant& value
     if (!text_editor || text_editor->GetValue().IsEmpty())
         return false;
 
-    std::string chosen_name = into_u8(text_editor->GetValue());
-    const char* unusable_symbols = "<>:/\\|?*\"";
-    for (size_t i = 0; i < std::strlen(unusable_symbols); i++) {
-        if (chosen_name.find_first_of(unusable_symbols[i]) != std::string::npos) {
-            m_was_unusable_symbol = true;
-            return false;
-        }
-    }
+    m_was_unusable_symbol = Slic3r::GUI::Plater::has_illegal_filename_characters(text_editor->GetValue());
+    if (m_was_unusable_symbol)
+        return false;
 
     // The icon can't be edited so get its old value and reuse it.
     wxVariant valueOld;
@@ -312,15 +319,19 @@ wxWindow* BitmapChoiceRenderer::CreateEditorCtrl(wxWindow* parent, wxRect labelR
 
     c_editor->SetSelection(atoi(data.GetText().c_str()));
 
-    // to avoid event propagation to other sidebar items
-    c_editor->Bind(wxEVT_COMBOBOX, [this](wxCommandEvent& evt) {
-            evt.StopPropagation();
+    
 #ifdef __linux__
-            // FinishEditing grabs new selection and triggers config update. We better call
-            // it explicitly, automatic update on KILL_FOCUS didn't work on Linux.
-            this->FinishEditing();
-#endif
+    c_editor->Bind(wxEVT_COMBOBOX, [this](wxCommandEvent& evt) {
+        // to avoid event propagation to other sidebar items
+        evt.StopPropagation();
+        // FinishEditing grabs new selection and triggers config update. We better call
+        // it explicitly, automatic update on KILL_FOCUS didn't work on Linux.
+        this->FinishEditing();
     });
+#else
+    // to avoid event propagation to other sidebar items
+    c_editor->Bind(wxEVT_COMBOBOX, [](wxCommandEvent& evt) { evt.StopPropagation(); });
+#endif
 
     return c_editor;
 }
